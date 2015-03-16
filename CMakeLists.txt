@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 2.8)
 project(stream-mmap)
 
 set(CMAKE_C_FLAGS 
-  "-std=c99 -m64 -O3 -pthread -g -Wall -Wextra -Wundef -Wshadow -Wcast-align -Wstrict-prototypes -Wbad-function-cast -Wuninitialized -pedantic")
+  "-std=c99 -m64 -msse2 -pthread -O3 -g -Wall -Wextra -Wundef -Wshadow -Wcast-align -Wstrict-prototypes -Wbad-function-cast -Wuninitialized -pedantic")
 
 add_library(lz4 STATIC
   lib/lz4/lz4.c
@@ -18,4 +18,9 @@ add_executable(stream-mmap
   main.c
   edge_stream.c)
 
+add_executable(cluster
+  cluster.c
+  edge_stream.c)
+
 target_link_libraries(stream-mmap lz4)
+target_link_libraries(cluster lz4)
