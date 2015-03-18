@@ -92,16 +92,19 @@ hits_delete(HITS *hits) {
 }
 
 void
+hits_expand(HITS *hits) {
+     mmap_array_resize(hits->hub_1, 2*hits->hub_1->n_elements);
+     mmap_array_resize(hits->hub_2, 2*hits->hub_2->n_elements);
+     mmap_array_resize(hits->auth_1, 2*hits->auth_1->n_elements);
+     mmap_array_resize(hits->auth_2, 2*hits->auth_2->n_elements);
+}
+
+void
 hits_set_n_pages(HITS *hits, size_t n_pages) {
-     if (n_pages <= hits->hub_1->n_elements) {
-	  hits->n_pages = n_pages;
-     } else {
-	  fprintf(
-	       stderr,
-	       "Error: trying to set more vertices (%"PRId64 ") than available (%"PRId64")\n", 
-		 n_pages, hits->hub_1->n_elements);
-	  exit(EXIT_FAILURE);
-     }
+     hits->n_pages = n_pages;
+     if (n_pages > hits->hub_1->n_elements) {	  
+	  hits_expand(hits);
+     } 	       
 }
 
 void
@@ -181,14 +184,13 @@ hits_end_loop(HITS *hits) {
 
 #define KB 1024LL
 #define MB (1024LL * KB)
-#define GB (1024LL * MB)
-#define TB (1024LL * GB)
 
 int 
 main(int argc, char **argv) {
-     size_t max_vertices = 4*GB;
+     size_t max_vertices = 1*MB;
+
      HITS *hits = hits_new(max_vertices);
-     printf("Memory allocation done for %zu vertices \n", max_vertices);
+     printf("Initial memory allocation done for %zu vertices \n", max_vertices);
 
      for (int i=0; i<4; ++i) {	  
 	  printf("HITS loop % 2d\n", i);

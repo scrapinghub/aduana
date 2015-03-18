@@ -33,6 +33,8 @@ def transform(pgz):
         for line in fgz:
             nline += 1
             try:
+                if line.strip()[0] == '#':
+                    continue
                 fields = line.split()
                 x = int(fields[0])
                 y = int(fields[1])

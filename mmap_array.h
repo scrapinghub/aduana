@@ -20,7 +20,7 @@ typedef struct {
      size_t element_size;
 
      int error;
-     char error_msg[MAX_ERROR_LENGTH+1];
+     char error_msg[MMAP_ARRAY_MAX_ERROR_LENGTH+1];
 
      int exit_on_error;
 } MMapArray;
@@ -49,6 +49,7 @@ mmap_array_idx(MMapArray *marr, size_t n);
 int
 mmap_array_set(MMapArray *marr, size_t n, const void *x);
 
-
+int
+mmap_array_resize(MMapArray *marr, size_t n_elements);
 
 #endif // _MMAP_ARRAY

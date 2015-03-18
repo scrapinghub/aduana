@@ -86,16 +86,18 @@ page_rank_delete(PageRank *pr) {
 }
 
 void
+page_rank_expand(PageRank *pr) {
+     mmap_array_resize(pr->out_degree, 2*pr->out_degree->n_elements);
+     mmap_array_resize(pr->value1, 2*pr->value1->n_elements);
+     mmap_array_resize(pr->value2, 2*pr->value2->n_elements);
+}
+
+void
 page_rank_set_n_pages(PageRank *pr, size_t n_pages) {
-     if (n_pages <= pr->out_degree->n_elements) {
-	  pr->n_pages = n_pages;
-     } else {
-	  fprintf(
-	       stderr,
-	       "Error: trying to set more vertices (%"PRId64 ") than available (%"PRId64")\n", 
-		 n_pages, pr->out_degree->n_elements);
-	  exit(EXIT_FAILURE);
-     }
+     pr->n_pages = n_pages;
+     if (n_pages > pr->out_degree->n_elements) {
+	  page_rank_expand(pr);
+     }    
 }
 
 void 
@@ -207,14 +209,12 @@ page_rank_end_loop(PageRank *pr) {
 
 #define KB 1024LL
 #define MB (1024LL * KB)
-#define GB (1024LL * MB)
-#define TB (1024LL * GB)
 
 int 
 main(int argc, char **argv) {
-     size_t max_vertices = 4*GB;
+     size_t max_vertices = 1*MB;
      PageRank *pr = page_rank_new(max_vertices, 0.85);
-     printf("Memory allocation done for %zu vertices \n", max_vertices);
+     printf("Initial memory allocation done for %zu vertices \n", max_vertices);
 
      for (int i=1; i<argc; ++i) {
 	  if (i % 10 == 0) {

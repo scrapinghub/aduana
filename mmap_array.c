@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #define _BSD_SOURCE 1
+#define _GNU_SOURCE 1
 
 #include <errno.h>
 #include <fcntl.h>
@@ -21,12 +22,18 @@ mmap_array_set_error(MMapArray *marr, int error, const char *msg) {
 }
 
 static void
-mmap_array_add_error(MMapArray *marr, const char *msg) {    
+mmap_array_add_error_aux(MMapArray *marr, const char *msg) {    
      (void)strncat(
 	  marr->error_msg, 
 	  msg, 
 	  MMAP_ARRAY_MAX_ERROR_LENGTH - 
 	       strnlen(marr->error_msg, MMAP_ARRAY_MAX_ERROR_LENGTH));
+}
+
+static void
+mmap_array_add_error(MMapArray *marr, const char *msg) {
+    mmap_array_add_error_aux(marr, ": ");
+    mmap_array_add_error_aux(marr, msg);
 }
 
 static void
@@ -62,14 +69,15 @@ mmap_array_init(MMapArray *marr, int fd, size_t n_elements, size_t element_size)
 
      marr->exit_on_error = 0;
 
-     int flags = MAP_SHARED;
+     int flags;
      if (fd == -1) {
-	  flags |= MAP_ANONYMOUS;
+	  flags = MAP_PRIVATE | MAP_ANONYMOUS;
      } else {
+          flags = MAP_SHARED;
 	  if (ftruncate(fd, n_elements*element_size) != 0) {
 	       int error_cp = errno;
 	       mmap_array_set_error(marr, mmap_array_error_file, __func__);
-	       mmap_array_add_error(marr, ": ");	       
+	       mmap_array_add_error(marr, "file truncation failed");	       
 	       mmap_array_add_error(marr, strerror(error_cp));	       
 	       return -1;
 	  }
@@ -79,7 +87,8 @@ mmap_array_init(MMapArray *marr, int fd, size_t n_elements, size_t element_size)
 
      if (marr->mem == MAP_FAILED) {
 	  int errno_cp = errno;
-	  mmap_array_set_error(marr, mmap_array_error_mmap, "Initializing mmap: ");
+	  mmap_array_set_error(marr, mmap_array_error_mmap, __func__);
+	  mmap_array_add_error(marr, "initializing mmap");
 	  mmap_array_add_error(marr, strerror(errno_cp));
 	  return -1;
      }
@@ -91,16 +100,18 @@ static int
 mmap_array_close(MMapArray *marr) {
      if (munmap(marr->mem, marr->n_elements*marr->element_size) != 0) {
 	  int errno_cp = errno;
-	  mmap_array_set_error(marr, mmap_array_error_mmap, "Closing mmap: ");
+	  mmap_array_set_error(marr, mmap_array_error_mmap, __func__);
+          mmap_array_add_error(marr, "munmap");
 	  mmap_array_add_error(marr, strerror(errno_cp));
 	  if (marr->exit_on_error) {
 	       mmap_array_exit_on_error(marr);
 	  }
 	  return -1;	  
      }     
-     if (close(marr->fd) != 0) {
+     if (marr->fd != -1 && close(marr->fd) != 0) {
 	  int errno_cp = errno;
-	  mmap_array_set_error(marr, mmap_array_error_file, "Closing file descriptor: ");
+	  mmap_array_set_error(marr, mmap_array_error_file, __func__);
+	  mmap_array_add_error(marr, "closing file descriptor");
 	  mmap_array_add_error(marr, strerror(errno_cp));
 	  if (marr->exit_on_error) {
 	       mmap_array_exit_on_error(marr);
@@ -138,7 +149,7 @@ int
 mmap_array_advise(MMapArray *marr, int flag) {
      if (madvise(marr->mem, marr->n_elements*marr->element_size, flag) != 0) {
 	  int errno_cp = errno;
-	  mmap_array_set_error(marr, mmap_array_error_advise, "madvise failed: ");
+	  mmap_array_set_error(marr, mmap_array_error_advise, __func__);
 	  mmap_array_add_error(marr, strerror(errno_cp));
 	  if (marr->exit_on_error) {
 	       mmap_array_exit_on_error(marr);
@@ -152,7 +163,7 @@ int
 mmap_array_sync(MMapArray *marr, int flag) {
      if (msync(marr->mem, marr->n_elements*marr->element_size, flag) != 0) {
 	  int errno_cp = errno;
-	  mmap_array_set_error(marr, mmap_array_error_advise, "msync failed: ");
+	  mmap_array_set_error(marr, mmap_array_error_advise, __func__);
 	  mmap_array_add_error(marr, strerror(errno_cp));
 	  if (marr->exit_on_error) {
 	       mmap_array_exit_on_error(marr);
@@ -201,5 +212,36 @@ mmap_array_delete(MMapArray *marr) {
 	  return -1;
      }
      free(marr);
+     return 0;
+}
+
+int
+mmap_array_resize(MMapArray *marr, size_t n_elements) {
+     const size_t new_size = n_elements*marr->element_size;
+     const size_t old_size = marr->n_elements*marr->element_size;
+     
+     if (marr->fd != -1 && ftruncate(marr->fd, new_size) !=0) {
+	  int errno_cp = errno;
+	  mmap_array_set_error(marr, mmap_array_error_file, __func__);
+	  mmap_array_add_error(marr, "resizing file");	  
+	  mmap_array_add_error(marr, strerror(errno_cp));	  
+	  if (marr->exit_on_error) {
+	       mmap_array_exit_on_error(marr);
+	  }
+	  return -1;
+     }
+     marr->mem = mremap(marr->mem, old_size, new_size, MREMAP_MAYMOVE);
+     if (marr->mem == MAP_FAILED) {
+	  int errno_cp = errno;
+	  mmap_array_set_error(marr, mmap_array_error_mmap, __func__);
+	  mmap_array_add_error(marr, "resizing mmap");
+	  mmap_array_add_error(marr, strerror(errno_cp));
+	  if (marr->exit_on_error) {
+	       mmap_array_exit_on_error(marr);
+	  }
+	  return -1;
+     }
+
+     marr->n_elements = n_elements;
      return 0;
 }
