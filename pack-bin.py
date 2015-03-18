@@ -9,7 +9,7 @@ import glob
 import gzip
 import struct
 import os.path
-
+import sys
 from multiprocessing import Pool
 
 import lz4f
@@ -63,7 +63,12 @@ def transform(pgz):
 
 
 if __name__ == '__main__':
+    if len(sys.argv) > 1:
+        path = sys.argv[1]
+    else:
+        path = '.'
+
     p = Pool(8)
-    p.map(transform, glob.glob('part-r-*.gz'))
+    p.map(transform, glob.glob(os.path.join(path, 'part-r-*.gz')))
     
     
