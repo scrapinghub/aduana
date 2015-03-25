@@ -19,7 +19,7 @@ typedef struct {
      size_t n_elements;
      size_t element_size;
 
-     int error;
+     MMapError error;
      char error_msg[MMAP_ARRAY_MAX_ERROR_LENGTH+1];
 
      int exit_on_error;
