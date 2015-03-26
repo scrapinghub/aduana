@@ -13,14 +13,18 @@ from multiprocessing import Pool
 
 import bcolz
 
+
+def iterlines(fgz):
+    """iterate lines, skipping those starting with #"""
+    return (l for l in fgz if not l.startswith('#'))
+
+
 def count_lines(fgz):
     pos = fgz.tell()
-    nlines = 0
-    for line in fgz:
-        nlines += 1
+    nlines = sum(1 for _ in iterlines(fgz))
     fgz.seek(pos)
-
     return nlines
+
 
 def transform(pgz):
     pbz = pgz[:-3] + '-bcolz'
@@ -38,7 +42,7 @@ def transform(pgz):
     def edge_iterator(fgz):
         a = 0
         b = 0
-        for line in fgz:
+        for line in iterlines(fgz):
             fields = line.split()
             x = int(fields[0])
             y = int(fields[1])            
@@ -56,6 +60,7 @@ def transform(pgz):
     bz.flush()    
     print "    {0}: {1}".format(pbz, nlines)
     fgz.close()
+
 
 if __name__ == '__main__':
     p = Pool(8)
