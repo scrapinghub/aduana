@@ -7,8 +7,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-
 #include <sys/stat.h>
+#include <time.h>
 
 #include "lmdb.h"
 #include "xxhash.h"
@@ -17,10 +17,178 @@
 #define MB (1024*KB)
 #define GB (1024*MB)
 
+// The information that comes with a crawled page
+typedef struct {
+     char *url;
+     char **links;
+     size_t n_links;
+     time_t time;
+     char *content_hash;
+     size_t content_hash_length;
+} CrawledPage;
+
+// The information we keep about crawled and uncrawled pages
+typedef struct {
+     char *url;
+     time_t first_crawl;
+     time_t last_crawl;
+     size_t n_changes;
+     size_t n_crawls;
+     size_t content_hash_length;
+     char *content_hash;
+} PageInfo;
+
+
+// Create a new PageInfo from just an (uncrawled) link
+PageInfo *
+page_info_new_link(const char *link) {
+     PageInfo *pi = calloc(1, sizeof(*pi));
+     if (!pi)
+	  return 0;
+
+     if (!(pi->url = malloc(strlen(link)))) {
+	  free(pi);
+	  return 0;
+     }
+     strcpy(pi->url, link);
+     return pi;
+}
+
+// Create a new PageInfo from a crawled page
+PageInfo *
+page_info_new_crawled(CrawledPage *cp) {
+     PageInfo *pi = page_info_new_link(cp->url);
+     if (!pi)
+	  return 0;
+
+     pi->first_crawl = pi->last_crawl = cp->time;
+     pi->n_crawls = 1;
+     pi->content_hash_length = cp->content_hash_length;
+     if (!(pi->content_hash = malloc(pi->content_hash_length))) {
+	  free(pi->url);
+	  free(pi->content_hash);
+	  free(pi);
+	  return 0;
+     }
+     memcpy(pi->content_hash, cp->content_hash, cp->content_hash_length);
+
+     return pi;
+}
+
+// Update the PageInfo with a CrawledPage for the same page
+int
+page_info_update(PageInfo *pi, CrawledPage *cp) {
+     // Unmodified fields:
+     //     url
+     //     if hash length did not change
+     //     (most probable use case is using fixed size hashes):
+     //         content_hash_length
+     //     if page did not change also:
+     //         content_hash
+     //         n_changes
+     if (pi->content_hash_length != cp->content_hash_length) {
+	  pi->content_hash = realloc(pi->content_hash,
+				     cp->content_hash_length);
+	  if (!pi->content_hash)
+	       return -1;
+	  pi->content_hash_length = cp->content_hash_length;
+	  memcpy(pi->content_hash, cp->content_hash, cp->content_hash_length);
+	  pi->n_changes++;
+     } else {
+	  for (size_t i=0; i<cp->content_hash_length; ++i)
+	       if (pi->content_hash[i] != cp->content_hash[i]) {
+		    for (size_t j=i; j<cp->content_hash_length; ++j)
+			 pi->content_hash[j] = cp->content_hash[j];
+		    pi->n_changes++;
+		    break;
+	       }
+     }
+     pi->n_crawls++;
+     pi->last_crawl = cp->time;
+
+     return 0;
+}
+
+// Serialize the PageInfo into a contiguos block of memory. Store
+// the block and its size inside val.
+// Return 0 if success, -1 if failure.
+int
+page_info_dump(PageInfo *pi, MDB_val *val) {
+     size_t url_size = strlen(pi->url) + 1;
+     val->mv_size =
+	  sizeof(pi->first_crawl) + sizeof(pi->last_crawl) + sizeof(pi->n_changes) +
+	  sizeof(pi->n_crawls) + sizeof(pi->content_hash_length) + url_size +
+	  pi->content_hash_length;
+     char *data = val->mv_data = malloc(val->mv_size);
+     if (!data)
+	  return -1;
+
+     size_t i = 0;
+     size_t j;
+     char * s;
+#define PAGE_INFO_WRITE(x) for (j=0, s=(char*)&(x); j<sizeof(x); data[i++] = s[j++])
+     PAGE_INFO_WRITE(pi->first_crawl);
+     PAGE_INFO_WRITE(pi->last_crawl);
+     PAGE_INFO_WRITE(pi->n_changes);
+     PAGE_INFO_WRITE(pi->n_crawls);
+     PAGE_INFO_WRITE(pi->content_hash_length);
+     for (j=0; j<url_size; data[i++] = pi->url[j++]);
+     for (j=0; j<pi->content_hash_length; data[i++] = pi->content_hash[j++]);
+
+     return 0;
+}
+
+// Create a new PageInfo loading the information from a previously
+// dumpled PageInfo inside val. Return pointer to the new PageInfo.
+PageInfo *
+page_info_load(MDB_val *val) {
+     PageInfo *pi = malloc(sizeof(*pi));
+     char *data = val->mv_data;
+     size_t i = 0;
+     size_t j;
+     char * d;
+#define PAGE_INFO_READ(x) for (j=0, d=(char*)&(x); j<sizeof(x); d[j++] = data[i++])
+     PAGE_INFO_READ(pi->first_crawl);
+     PAGE_INFO_READ(pi->last_crawl);
+     PAGE_INFO_READ(pi->n_changes);
+     PAGE_INFO_READ(pi->n_crawls);
+     PAGE_INFO_READ(pi->content_hash_length);
+
+     size_t url_size = strlen(data + i) + 1;
+     if (!(pi->url = malloc(url_size))) {
+	  free(pi);
+	  return 0;
+     }
+     for (j=0; j<url_size; pi->url[j++] = data[i++]);
+
+     if (!(pi->content_hash = malloc(pi->content_hash_length))) {
+	  free(pi->url);
+	  free(pi);
+	  return 0;
+     }
+     for (j=0; j<pi->content_hash_length; pi->content_hash[j++] = data[i++]);
+
+     return pi;
+}
+
+// Destroy PageInfo
+void
+page_info_delete(PageInfo *pi) {
+     if (pi != 0) {
+	  free(pi->url);
+	  free(pi->content_hash);
+	  free(pi);
+     }
+}
+
+
+// the "info" database stores a fixed amount of keys
+// this key points to the number of pages inside the database,
+// crawled or not. It is used to assign new IDs
+char info_n_pages[] = "n_pages";
+
 #define PAGE_DB_MAX_ERROR_LENGTH 10000
 #define PAGE_DB_DEFAULT_SIZE 100*MB
-
-char info_n_pages[] = "n_pages";
 
 typedef enum {
      page_db_error_ok = 0,
@@ -31,23 +199,24 @@ typedef enum {
 
 typedef struct {
      MDB_env *env;
-     
+
      PageDBError error;
-     char error_msg[PAGE_DB_MAX_ERROR_LENGTH+1];    
+     // a descriptive message associated with error
+     char error_msg[PAGE_DB_MAX_ERROR_LENGTH+1];
 } PageDB;
 
 static void
 page_db_set_error(PageDB *db, int error, const char *msg) {
      db->error = error;
-     strncpy(db->error_msg, msg, PAGE_DB_MAX_ERROR_LENGTH);     
+     strncpy(db->error_msg, msg, PAGE_DB_MAX_ERROR_LENGTH);
 }
 
 static void
-page_db_add_error_aux(PageDB *db, const char *msg) {    
+page_db_add_error_aux(PageDB *db, const char *msg) {
      (void)strncat(
-	  db->error_msg, 
-	  msg, 
-	  PAGE_DB_MAX_ERROR_LENGTH - 
+	  db->error_msg,
+	  msg,
+	  PAGE_DB_MAX_ERROR_LENGTH -
 	       strnlen(db->error_msg, PAGE_DB_MAX_ERROR_LENGTH));
 }
 
@@ -57,12 +226,13 @@ page_db_add_error(PageDB *db, const char *msg) {
     page_db_add_error_aux(db, msg);
 }
 
-static PageDBError 
+// Doubles database size
+static PageDBError
 page_db_grow(PageDB *db) {
      MDB_envinfo info;
-     int mdb_rc = 
+     int mdb_rc =
 	  mdb_env_info(db->env, &info) ||
-	  mdb_env_set_mapsize(db->env, info.me_mapsize*2);	       
+	  mdb_env_set_mapsize(db->env, info.me_mapsize*2);
      if (mdb_rc != 0) {
 	  page_db_set_error(db, page_db_error_internal, __func__);
 	  page_db_add_error(db, mdb_strerror(mdb_rc));
@@ -70,10 +240,11 @@ page_db_grow(PageDB *db) {
      return db->error;
 }
 
+// Creates a new database and stores data inside path
 PageDBError
 page_db_new(PageDB **db, const char *path) {
-     PageDB *p = *db = (PageDB*)malloc(sizeof(PageDB));
-     if (p == 0) 
+     PageDB *p = *db = malloc(sizeof(*p));
+     if (p == 0)
 	  return page_db_error_memory;
      p->error = page_db_error_ok;
      p->error_msg[0] = '\0';
@@ -81,15 +252,15 @@ page_db_new(PageDB **db, const char *path) {
      const char *error = 0;
      // create directory if not present yet
      if (mkdir(path, 0775) != 0) {
-	  if (errno != EEXIST) 
+	  if (errno != EEXIST)
 	       error = strerror(errno);
 	  else {
 	       // path exists, check that is a valid directory
 	       struct stat buf;
-	       if (stat(path, &buf) != 0) 
+	       if (stat(path, &buf) != 0)
 		    error = strerror(errno);
-	       else if ((buf.st_mode & S_IFDIR) == 0) 		    
-		    error = "existing path not a directory";	       
+	       else if (!(buf.st_mode & S_IFDIR))
+		    error = "existing path not a directory";
 	  }
      }
 
@@ -98,18 +269,18 @@ page_db_new(PageDB **db, const char *path) {
 	  page_db_add_error(p, error);
 	  return p->error;
      }
-	       
+
      // initialize LMDB on the directory
      MDB_txn *txn;
      MDB_dbi dbi;
-     int mdb_rc = 0;     
-     if ((mdb_rc = mdb_env_create(&p->env) != 0)) 
-          error = "creating environment";
+     int mdb_rc = 0;
+     if ((mdb_rc = mdb_env_create(&p->env) != 0))
+	  error = "creating environment";
      else if ((mdb_rc = mdb_env_set_mapsize(p->env, PAGE_DB_DEFAULT_SIZE)) != 0)
-          error = "setting map size";
+	  error = "setting map size";
      else if ((mdb_rc = mdb_env_set_maxdbs(p->env, 4)) != 0)
 	  error = "setting number of databases";
-     else if ((mdb_rc = mdb_env_open(p->env, path, 0, 0664) != 0)) 
+     else if ((mdb_rc = mdb_env_open(p->env, path, 0, 0664) != 0))
 	  error = "opening environment";
      else if ((mdb_rc = mdb_txn_begin(p->env, 0, 0, &txn)) != 0)
 	  error = "starting transaction";
@@ -127,7 +298,7 @@ page_db_new(PageDB **db, const char *path) {
 	  };
 	  switch (mdb_rc = mdb_put(txn, dbi, &key, &val, MDB_NOOVERWRITE)) {
 	  case MDB_KEYEXIST:
-	  case 0: 
+	  case 0:
 	       if ((mdb_rc = mdb_txn_commit(txn)) != 0)
 		    error = "could not commit n_pages";
 	       break; // we good
@@ -135,7 +306,7 @@ page_db_new(PageDB **db, const char *path) {
 	       error = "could not initialize info.n_pages";
 	  }
      }
-     
+
      if (error != 0) {
 	  page_db_set_error(p, page_db_error_internal, __func__);
 	  page_db_add_error(p, error);
@@ -150,12 +321,12 @@ page_db_new(PageDB **db, const char *path) {
 /* How to check if a page has been already been added to the database?
    We cannot add URL's directly as keys since we need to setup a maximum
    key size. We could make key sizes long enough, say, 3000 characters but
-   I have a bad feeling about that. 
+   I have a bad feeling about that.
 
    Insted, we hash all URLs using 64 bit hashes, even for huge crawls we get
    something only in the order of 2^32 different URLs, which is small enough
-   to assume there are no collisions. Neverthless I did some tests using 
-   the URLs directly as keys. Note that timings also include the time to read the 
+   to assume there are no collisions. Neverthless I did some tests using
+   the URLs directly as keys. Note that timings also include the time to read the
    file, detect URL limits and compute whatever hash if necessary.
 
    Results with LMDB and XXHASH:
@@ -163,33 +334,96 @@ page_db_new(PageDB **db, const char *path) {
       1. String keys must be terminated with '\0', otherwise some keys are not retrieved!
       2. Some string keys fail to be retrieved, usually with weird characters inside
       2. Directly inserting the strings instead of hashes is MUCH faster (54M urls),
-         but query performance is better with hashes:
-         a. Average insert time:
-              string: 7.1e-7
-              hash  : 5.1e-6
-         b. Average query time:
-              string: 3.0e-6
-              hash  : 1.3e-6
+	 but query performance is better with hashes:
+	 a. Average insert time:
+	      string: 7.1e-7
+	      hash  : 5.1e-6
+	 b. Average query time:
+	      string: 3.0e-6
+	      hash  : 1.3e-6
 
     Results with hat-trie (https://github.com/dcjones/hat-trie):
 
       1. Timings:
-         a. Average insert time: 1.2e-6
-         b. Average query time : 1.3e-6
-         
-    Although hat-trie gives better results LMDB performance is very good and has much 
+	 a. Average insert time: 1.2e-6
+	 b. Average query time : 1.3e-6
+
+    Although hat-trie gives better results LMDB performance is very good and has much
     more features.
 */
 
+static int
+page_db_add_crawled_page_info(MDB_cursor *cur, MDB_val *key, CrawledPage *page, int *mdb_error) {
+     MDB_val val;
+     PageInfo *pi = 0;
+
+     int mdb_rc = mdb_cursor_get(cur, key, &val, MDB_SET);
+     int put_flags = 0;
+     switch (mdb_rc) {
+     case 0:
+	  if (!(pi = page_info_load(&val)))
+	       goto on_error;
+	  if ((page_info_update(pi, page) != 0))
+	       goto on_error;
+	  put_flags = MDB_CURRENT;
+	  break;
+     case MDB_NOTFOUND:
+	  if (!(pi = page_info_new_crawled(page)))
+	      goto on_error;
+	  break;
+     default:
+	  goto on_error;
+     }
+
+     if ((page_info_dump(pi, &val)   != 0))
+	  goto on_error;
+
+     if ((mdb_rc = mdb_cursor_put(cur, key, &val, put_flags)) != 0)
+	  goto on_error;
+
+     *mdb_error = 0;
+     page_info_delete(pi);
+     return 0;
+
+on_error:
+     *mdb_error = mdb_rc;
+     page_info_delete(pi);
+     return -1;
+}
+
+static int
+page_db_add_link_page_info(MDB_cursor *cur, MDB_val *key, char *url, int *mdb_error) {
+     MDB_val val;
+     int mdb_rc = 0;
+
+     PageInfo *pi = page_info_new_link(url);
+     if (!pi)
+	  goto on_error;
+
+     if ((page_info_dump(pi, &val)   != 0))
+	  goto on_error;
+
+     if ((mdb_rc = mdb_cursor_put(cur, key, &val, MDB_NOOVERWRITE)) != 0)
+	  goto on_error;
+
+     *mdb_error = 0;
+     page_info_delete(pi);
+     return 0;
+on_error:
+     *mdb_error = mdb_rc;
+     page_info_delete(pi);
+     return -1;
+}
+
 PageDBError
-page_db_add(PageDB *db, char *url, char **links, int n_links) {
+page_db_add(PageDB *db, CrawledPage *page) {
      MDB_txn *txn;
-     MDB_dbi dbi_hash2url;
+     MDB_dbi dbi_hash2info;
      MDB_dbi dbi_hash2idx;
      MDB_dbi dbi_links;
      MDB_dbi dbi_info;
 
-     MDB_cursor *cur_hash2url;
+     MDB_cursor *cur_hash2info;
      MDB_cursor *cur_hash2idx;
      MDB_cursor *cur_links;
      MDB_cursor *cur_info;
@@ -206,85 +440,85 @@ txn_start: // return here if the transaction is discarded and must be repeated
      const int flags = MDB_CREATE | MDB_INTEGERKEY;
      if ((mdb_rc = mdb_txn_begin(db->env, 0, 0, &txn)) != 0)
 	  error = "opening transaction";
-     // open cursor to hash2url database
+     // open cursor to hash2info database
      else if ((mdb_rc = mdb_dbi_open(
-		    txn, 
-		    "hash2url", 
-		    flags, 
-		    &dbi_hash2url)) != 0)
-	  error = "opening hash2url database";
+		    txn,
+		    "hash2info",
+		    flags,
+		    &dbi_hash2info)) != 0)
+	  error = "opening hash2info database";
      else if ((mdb_rc = mdb_cursor_open(
-		    txn, 
-		    dbi_hash2url,
-		    &cur_hash2url)) != 0)
-	  error = "opening hash2url cursor";
+		    txn,
+		    dbi_hash2info,
+		    &cur_hash2info)) != 0)
+	  error = "opening hash2info cursor";
      // open cursor to hash2idx database
      else if ((mdb_rc = mdb_dbi_open(
-		    txn, 
-		    "hash2idx", 
-		    flags, 
+		    txn,
+		    "hash2idx",
+		    flags,
 		    &dbi_hash2idx)) != 0)
 	  error = "opening hash2idx database";
      else if ((mdb_rc = mdb_cursor_open(
-		    txn, 
+		    txn,
 		    dbi_hash2idx,
 		    &cur_hash2idx)) != 0)
-	  error = "opening hash2idx cursor";     
+	  error = "opening hash2idx cursor";
      // open cursor to links database
      else if ((mdb_rc = mdb_dbi_open(
-		    txn, 
-		    "links", 
-		    flags, 
+		    txn,
+		    "links",
+		    flags,
 		    &dbi_links)) != 0)
 	  error = "opening links database";
      else if ((mdb_rc = mdb_cursor_open(
-		    txn, 
+		    txn,
 		    dbi_links,
 		    &cur_links)) != 0)
-	  error = "opening links cursor";     
+	  error = "opening links cursor";
      // open cursor to info database
      else if ((mdb_rc = mdb_dbi_open(
-		    txn, 
-		    "info", 
-		    0, 
+		    txn,
+		    "info",
+		    0,
 		    &dbi_info)) != 0)
 	  error = "opening info database";
      else if ((mdb_rc = mdb_cursor_open(
-		    txn, 
-		    dbi_info, 
+		    txn,
+		    dbi_info,
 		    &cur_info)) != 0)
-	  error = "opening info cursor";     
+	  error = "opening info cursor";
 
-     if (error != 0) 
-	  goto mdb_error;
+     if (error != 0)
+	  goto on_error;
 
      // get n_pages
      key.mv_size = sizeof(info_n_pages);
-     key.mv_data = info_n_pages; 
+     key.mv_data = info_n_pages;
      if ((mdb_rc = mdb_cursor_get(cur_info, &key, &val, MDB_SET)) != 0) {
 	  error = "retrieving info.n_pages";
-	  goto mdb_error;
+	  goto on_error;
      }
      size_t n_pages = *(size_t*)val.mv_data;
-	  
-     // For URL + Links
-     //     Compute hash
-     //     Is hash present in hash2idx?
-     //        YES -> get ID
-     //        NO  -> 1. get new ID
-     //               2. put new entry in hash2idx
-     //               3. put new entry in hash2url
-     //     Append ID to ID list
-     // Write ID list to links db, overwritting if necessary
-     uint64_t *id = (uint64_t*)malloc((n_links + 1)*sizeof(uint64_t));
-     for (int i=0; i <= n_links; ++i) {
-	  char *s = (i == 0)? url: links[i - 1];
- 
-	  size_t len = strlen(s);
-	  uint64_t hash = XXH64(s, len, 0);
 
-	  key.mv_size = sizeof(uint64_t);
-	  key.mv_data = &hash;
+
+     uint64_t hash = XXH64(page->url, strlen(page->url), 0);
+     key.mv_size = sizeof(uint64_t);
+     key.mv_data = &hash;
+     if (page_db_add_crawled_page_info(cur_hash2info, &key, page, &mdb_rc) != 0) {
+	  error = "adding/updating page info";
+	  goto on_error;
+     }
+
+     uint64_t *id = malloc((page->n_links + 1)*sizeof(*id));
+     for (size_t i=0; i <= page->n_links; ++i) {
+	  char *link = i > 0? page->links[i - 1]: 0;
+	  if (link) {
+	       link = page->links[i - 1];
+	       hash = XXH64(link, strlen(link), 0);
+	       key.mv_size = sizeof(uint64_t);
+	       key.mv_data = &hash;
+	  }
 	  val.mv_size = sizeof(uint64_t);
 	  val.mv_data = &n_pages;
 
@@ -292,18 +526,20 @@ txn_start: // return here if the transaction is discarded and must be repeated
 	  case MDB_KEYEXIST: // not really an error
 	       id[i] = *(uint64_t*)val.mv_data;
 	       break;
-	  case 0: // add also url
+	  case 0:
 	       id[i] = n_pages++;
-	       val.mv_size = len + 1; // append end of string marker
-	       val.mv_data = s;
-	       if ((mdb_rc = mdb_cursor_put(cur_hash2url, &key, &val, MDB_NOOVERWRITE)) != 0)
-		    goto mdb_error;
+	       if (link) {
+		    if (page_db_add_link_page_info(cur_hash2info, &key, link, &mdb_rc) != 0) {
+			 error = "adding/updating link info";
+			 goto on_error;
+		    }
+	       }
 	       break;
 	  default:
-	       goto mdb_error;
+	       goto on_error;
 	  }
      }
-     
+
      // store n_pages
      key.mv_size = sizeof(info_n_pages);
      key.mv_data = info_n_pages;
@@ -311,23 +547,23 @@ txn_start: // return here if the transaction is discarded and must be repeated
      val.mv_data = &n_pages;
      if ((mdb_rc = mdb_cursor_put(cur_info, &key, &val, 0)) != 0) {
 	  error = "storing n_pages";
-	  goto mdb_error;
+	  goto on_error;
      }
 
      // store links and commit transaction
      key.mv_size = sizeof(uint64_t);
      key.mv_data = id;
-     val.mv_size = sizeof(uint64_t)*n_links;
+     val.mv_size = sizeof(uint64_t)*page->n_links;
      val.mv_data = id + 1;
-     mdb_rc = 
+     mdb_rc =
 	  mdb_cursor_put(cur_links, &key, &val, 0) ||
 	  mdb_txn_commit(txn);
      if (mdb_rc != 0)
-	  goto mdb_error;
+	  goto on_error;
 
 
      return db->error;
-mdb_error:
+on_error:
      switch (mdb_rc) {
      case MDB_MAP_FULL:
 	  // close transactions, resize, and try again
@@ -336,14 +572,15 @@ mdb_error:
 	  goto txn_start;
 
      case MDB_TXN_FULL: // TODO unlikely. Treat as error.
-     default: 
+     default:
 	  page_db_set_error(db, page_db_error_internal, __func__);
 	  if (error != 0)
 	       page_db_add_error(db, error);
-	  page_db_add_error(db, mdb_strerror(mdb_rc));
+	  if (mdb_rc != 0)
+	       page_db_add_error(db, mdb_strerror(mdb_rc));
 
 	  return db->error;
-     }     
+     }
 }
 
 typedef struct {
@@ -351,7 +588,7 @@ typedef struct {
      int64_t to;
 } Edge;
 
-typedef enum {     
+typedef enum {
      edge_stream_state_init,
      edge_stream_state_next,
      edge_stream_state_end,
@@ -360,7 +597,7 @@ typedef enum {
 
 typedef struct {
      MDB_cursor *cur;
-     
+
      uint64_t from;
      uint64_t *to;
      size_t n_to;
@@ -382,18 +619,18 @@ edge_stream_copy_links(EdgeStream *es, MDB_val *key, MDB_val *val) {
 	  es->m_to = es->n_to;
      }
      es->from = *(uint64_t*)key->mv_data;
-     
+
      uint64_t *links = val->mv_data;
-     for (size_t i=0; i<es->n_to; ++i) 
+     for (size_t i=0; i<es->n_to; ++i)
 	  es->to[i] = links[i];
 
-     return 0;	  
+     return 0;
 }
 
 PageDBError
 edge_stream_new(EdgeStream **es, PageDB *db) {
-     EdgeStream *p = *es = (EdgeStream*)calloc(1, sizeof(EdgeStream));
-     if (p == 0) 
+     EdgeStream *p = *es = calloc(1, sizeof(*p));
+     if (p == 0)
 	  return page_db_error_memory;
 
      MDB_txn *txn;
@@ -406,23 +643,23 @@ edge_stream_new(EdgeStream **es, PageDB *db) {
 
      // start a new read transaction
      if ((mdb_rc = mdb_txn_begin(db->env, 0, MDB_RDONLY, &txn)) != 0)
-	  error = "opening transaction";     
+	  error = "opening transaction";
      // open cursor to links database
      else if ((mdb_rc = mdb_dbi_open(
-		    txn, 
-		    "links", 
-		    MDB_CREATE | MDB_INTEGERKEY, 
+		    txn,
+		    "links",
+		    MDB_CREATE | MDB_INTEGERKEY,
 		    &dbi_links)) != 0)
 	  error = "opening links database";
      else if ((mdb_rc = mdb_cursor_open(
-		    txn, 
+		    txn,
 		    dbi_links,
 		    &p->cur)) != 0)
-	  error = "opening links cursor";          
+	  error = "opening links cursor";
 
      if (error != 0)
 	  goto mdb_error;
-     
+
      switch (mdb_rc = mdb_cursor_get(p->cur, &key, &val, MDB_FIRST)) {
      case 0:
 	  p->state = edge_stream_state_init;
@@ -430,13 +667,13 @@ edge_stream_new(EdgeStream **es, PageDB *db) {
 	       return page_db_error_internal;
 	  break;
      case MDB_NOTFOUND:
-	  p->state = edge_stream_state_end;	 
+	  p->state = edge_stream_state_end;
 	  break;
      default:
 	  p->state = edge_stream_state_error;
 	  goto mdb_error;
      }
-     
+
      return db->error;
 
 mdb_error:
@@ -445,7 +682,7 @@ mdb_error:
 	  page_db_add_error(db, error);
      page_db_add_error(db, mdb_strerror(mdb_rc));
 
-     return db->error;     
+     return db->error;
 }
 
 EdgeStreamState
@@ -456,12 +693,12 @@ edge_stream_next(EdgeStream *es, Edge *edge) {
 	  MDB_val val;
 
 	  switch (mdb_rc = mdb_cursor_get(es->cur, &key, &val, MDB_NEXT)) {
-	  case 0:	       
+	  case 0:
 	       if (edge_stream_copy_links(es, &key, &val) != 0)
 		    return page_db_error_internal;
 	       break;
 	  case MDB_NOTFOUND:
-	       return es->state = edge_stream_state_end;	 
+	       return es->state = edge_stream_state_end;
 	  default:
 	       return es->state = edge_stream_state_error;
 	  }
@@ -469,13 +706,13 @@ edge_stream_next(EdgeStream *es, Edge *edge) {
      es->state = edge_stream_state_next;
      edge->from = es->from;
      edge->to = es->to[es->i_to++];
-     
+
      return es->state;
 }
 
 void
 edge_stream_delete(EdgeStream *es) {
-     mdb_txn_abort(mdb_cursor_txn(es->cur));    
+     mdb_txn_abort(mdb_cursor_txn(es->cur));
      free(es->to);
      free(es);
 }
@@ -488,19 +725,31 @@ main(void) {
 	  printf("%d %s\n", pdb_err, db!=0? db->error_msg: "NULL");
 	  exit(EXIT_FAILURE);
      }
-     char *links[] = {
-	  "a",
-	  "b",
-	  "www.google.com"
+     char *cp1_links[] = {"a", "b", "www.google.com"};
+     CrawledPage cp1 = {
+	  .url                 = "cp1",
+	  .links               = cp1_links,
+	  .n_links             = 3,
+	  .time                = 0,
+	  .content_hash        = 0,
+	  .content_hash_length = 0
+     };
+     char *cp2_links[] = {"x", "y"};
+     CrawledPage cp2 = {
+	  .url                 = "cp2",
+	  .links               = cp2_links,
+	  .n_links             = 2,
+	  .time                = 0,
+	  .content_hash        = 0,
+	  .content_hash_length = 0
      };
 
-     if ((pdb_err = page_db_add(db, "new_url", links, 3)) != 0) {
+     if ((pdb_err = page_db_add(db, &cp1)) != 0) {
 	  printf("%d %s\n", pdb_err, db->error_msg);
 	  exit(EXIT_FAILURE);
      }
-     links[0] = "xxx";
-     links[1] = "aaa";
-     if ((pdb_err = page_db_add(db, "another_url", links, 2)) != 0) {
+
+     if ((pdb_err = page_db_add(db, &cp2)) != 0) {
 	  printf("%d %s\n", pdb_err, db->error_msg);
 	  exit(EXIT_FAILURE);
      }
@@ -511,12 +760,12 @@ main(void) {
 	  exit(EXIT_FAILURE);
      }
      if (es->state == edge_stream_state_init) {
-	  Edge edge;     
+	  Edge edge;
 	  while (edge_stream_next(es, &edge) == edge_stream_state_next) {
 	       printf("%zu %zu\n", edge.from, edge.to);
 	  }
      }
      edge_stream_delete(es);
-     
+
      return 0;
 }
