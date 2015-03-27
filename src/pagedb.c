@@ -17,6 +17,17 @@
 #define MB (1024*KB)
 #define GB (1024*MB)
 
+/** Print hexadecimal representation of hash.
+
+We assume that out has twice the length of the original hash to
+print the hexadecimal representation.
+*/
+void
+hash_print(char *hash, size_t len, char *out) {
+     for (size_t i=0; i<len; ++i)
+	  sprintf(out + 2*i, "%02X", hash[i]);
+}
+
 /** The information that comes with a crawled page */
 typedef struct {
      char *url;                   /**< ASCII, null terminated string for the page URL*/
@@ -40,6 +51,52 @@ typedef struct {
      char *content_hash;          /**< Byte sequence with the hash of the last crawl */
 } PageInfo;
 
+
+/** Write printed representation of PageInfo.
+
+    The representation is:
+	first_crawl last_crawl n_crawls n_changes url
+
+    Each field is separated with an space. The string is null terminated.
+    We use the following format for each field:
+    - first_crawl: the standard fixed size (24 bytes) as output by ctime.
+      For example: Mon Jan 1 08:01:59 2015
+    - last_crawl: the same as first_crawl
+    - n_crawls: To ensure fixed size representation this value is converted
+      to double and represented in exponential notation with two digits. It has
+      therefore always 8 bytes length:
+	    1.21e+01
+    - n_changes: The same as n_crawls
+    - url: This is the only varying in length field. However, it is truncated at
+      512 bytes length.
+
+    @param pi The @ref PageInfo to be printed
+    @param out The output buffer, which must be at least 580 bytes long
+    @return size of representation or -1 if error
+*/
+int
+page_info_print(const PageInfo *pi, char *out) {
+     size_t i = 0;
+     strncpy(out, ctime(&pi->first_crawl), 24);
+     i += 24;
+     out[i++] = '|';                                        // i = 25
+     strncpy(out + i, ctime(&pi->last_crawl), 24);
+     i += 24;
+     out[i++] = '|';                                        // i = 50
+     if (snprintf(out + i, 9, "%.2e", (double)pi->n_crawls) < 0)
+	  return -1;
+     i += 8;
+     out[i++] = '|';                                      // i = 59
+     if (snprintf(out + i, 9, "%.2e", (double)pi->n_changes) < 0)
+	  return -1;
+     i += 8;
+     out[i++] = '|';                                      // i = 68
+     for (int j=0;
+	  j<511 && pi->url[j] != '\0';
+	  out[i++] = pi->url[j++]);                       // i <= 580
+     out[i] = '\0';
+     return i;
+}
 
 /** Create a new PageInfo from just an (uncrawled) link URL.
  *
@@ -673,6 +730,68 @@ on_error:
 	  return db->error;
      }
 }
+
+/** Retrieve the PageInfo stored inside the database.
+
+    Beware that if not found it will signal success but the PageInfo will be
+    NULL
+ */
+PageDBError
+page_db_get_info(PageDB *db, const char *url, PageInfo **pi) {
+     MDB_txn *txn;
+     MDB_dbi dbi;
+
+     int mdb_rc;
+     char *error = 0;
+     if ((mdb_rc = mdb_txn_begin(db->env, 0, MDB_RDONLY, &txn)) != 0)
+	  error = "opening transaction";
+     // open hash2info database
+     else if ((mdb_rc = mdb_dbi_open(
+		    txn,
+		    "hash2info",
+		    MDB_CREATE | MDB_INTEGERKEY,
+		    &dbi)) != 0) {
+	  error = "opening hash2info database";
+	  goto on_error;
+     }
+     else {
+	  uint64_t hash = XXH64(url, strlen(url), 0);
+	  MDB_val key = {
+	       .mv_size = sizeof(uint64_t),
+	       .mv_data = &hash
+	  };
+	  MDB_val val;
+	  switch (mdb_rc = mdb_get(txn, dbi, &key, &val)) {
+	  case 0:
+	       *pi = page_info_load(&val);
+	       if (!pi) {
+		    error = "deserializing data from database";
+		    goto on_error;
+	       }
+	       break;
+	  case MDB_NOTFOUND:
+	       *pi = 0;
+	       return 0;
+	       break;
+	  default:
+	       error = "retrieving val from hash2info";
+	       goto on_error;
+	       break;
+	  }
+     }
+     mdb_txn_abort(txn);
+     return 0;
+
+on_error:
+     page_db_set_error(db, page_db_error_internal, __func__);
+     if (error != 0)
+	  page_db_add_error(db, error);
+     if (mdb_rc != 0)
+	  page_db_add_error(db, mdb_strerror(mdb_rc));
+
+     return db->error;
+}
+
 /// @}
 
 
@@ -788,7 +907,7 @@ mdb_error:
 }
 
 /** Get next element inside stream.
- * 
+ *
  * @return @ref ::link_stream_state_next if success
  */
 LinkStreamState
@@ -838,7 +957,7 @@ main(void) {
 	  .url                 = "cp1",
 	  .links               = cp1_links,
 	  .n_links             = 3,
-	  .time                = 0,
+	  .time                = time(0),
 	  .content_hash        = 0,
 	  .content_hash_length = 0
      };
@@ -847,7 +966,7 @@ main(void) {
 	  .url                 = "cp2",
 	  .links               = cp2_links,
 	  .n_links             = 2,
-	  .time                = 0,
+	  .time                = time(0),
 	  .content_hash        = 0,
 	  .content_hash_length = 0
      };
@@ -860,6 +979,24 @@ main(void) {
      if ((pdb_err = page_db_add(db, &cp2)) != 0) {
 	  printf("%d %s\n", pdb_err, db->error_msg);
 	  exit(EXIT_FAILURE);
+     }
+
+     char pi_out[1000];
+     char *print_pages[] = {"cp1", "cp2", "www.google.com"};
+     for (size_t i=0; i<3; ++i) {
+	  PageInfo *pi;
+	  if ((pdb_err = page_db_get_info(db, print_pages[i], &pi)) != 0) {
+	       printf("%d %s\n", pdb_err, db->error_msg);
+	       exit(EXIT_FAILURE);
+	  }
+	  if (pi != 0) {
+	       page_info_print(pi, pi_out);
+	       page_info_delete(pi);
+	  } else {
+	       printf("Could not find page: %s\n", print_pages[i]);
+	  }
+
+	  printf("%s\n", pi_out);
      }
 
      LinkStream *es;
