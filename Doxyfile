@@ -1,0 +1,3 @@
+INPUT = src/pagedb.c src/pagedb.h
+OUTPUT_DIRECTORY = doc
+OPTIMIZE_OUTPUT_FOR_C = YES

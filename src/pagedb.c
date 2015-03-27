@@ -17,29 +17,34 @@
 #define MB (1024*KB)
 #define GB (1024*MB)
 
-// The information that comes with a crawled page
+/** The information that comes with a crawled page */
 typedef struct {
-     char *url;
-     char **links;
-     size_t n_links;
-     time_t time;
-     char *content_hash;
-     size_t content_hash_length;
+     char *url;                   /**< ASCII, null terminated string for the page URL*/
+     char **links;                /**< Each links[i] is also a URL */
+     size_t n_links;              /**< Number of links */
+     time_t time;                 /**< UNIX time of the crawl */
+     char *content_hash;          /**< A hash to detect content change since last crawl. Arbitrary byte sequence */
+     size_t content_hash_length;  /**< Number of byes of the content_hash */
 } CrawledPage;
 
-// The information we keep about crawled and uncrawled pages
+/// @addtogroup PageInfo
+/// @{
+/** The information we keep about crawled and uncrawled pages */
 typedef struct {
-     char *url;
-     time_t first_crawl;
-     time_t last_crawl;
-     size_t n_changes;
-     size_t n_crawls;
-     size_t content_hash_length;
-     char *content_hash;
+     char *url;                   /**< A copy of either @ref CrawledPage::url or @ref CrawledPage::links[i] */
+     time_t first_crawl;          /**< First UNIX time this page was crawled */
+     time_t last_crawl;           /**< Last UNIX time this page was crawled */
+     size_t n_changes;            /**< Number of content changes detected between first and last crawl */
+     size_t n_crawls;             /**< Number of times this page has crawled. Can be zero if it has been observed just as a link*/
+     size_t content_hash_length;  /**< Number of bytes in @ref content_hash */
+     char *content_hash;          /**< Byte sequence with the hash of the last crawl */
 } PageInfo;
 
 
-// Create a new PageInfo from just an (uncrawled) link
+/** Create a new PageInfo from just an (uncrawled) link URL.
+ *
+ * @return A pointer to the new structure or NULL if failure
+ */
 PageInfo *
 page_info_new_link(const char *link) {
      PageInfo *pi = calloc(1, sizeof(*pi));
@@ -54,9 +59,12 @@ page_info_new_link(const char *link) {
      return pi;
 }
 
-// Create a new PageInfo from a crawled page
+/** Create a new PageInfo from a crawled page.
+ *
+ * @return A pointer to the new structure or NULL if failure
+ */
 PageInfo *
-page_info_new_crawled(CrawledPage *cp) {
+page_info_new_crawled(const CrawledPage *cp) {
      PageInfo *pi = page_info_new_link(cp->url);
      if (!pi)
 	  return 0;
@@ -75,9 +83,12 @@ page_info_new_crawled(CrawledPage *cp) {
      return pi;
 }
 
-// Update the PageInfo with a CrawledPage for the same page
+/** Update the PageInfo with a CrawledPage for the same page
+ *
+ * @return 0 if success, -1 if failure
+ */
 int
-page_info_update(PageInfo *pi, CrawledPage *cp) {
+page_info_update(PageInfo *pi, const CrawledPage *cp) {
      // Unmodified fields:
      //     url
      //     if hash length did not change
@@ -109,11 +120,15 @@ page_info_update(PageInfo *pi, CrawledPage *cp) {
      return 0;
 }
 
-// Serialize the PageInfo into a contiguos block of memory. Store
-// the block and its size inside val.
-// Return 0 if success, -1 if failure.
+/** Serialize the PageInfo into a contiguos block of memory.
+ *
+ * @param pi The PageInfo to be serialized
+ * @param val The destination of the serialization
+ *
+ * @return 0 if success, -1 if failure.
+ */
 int
-page_info_dump(PageInfo *pi, MDB_val *val) {
+page_info_dump(const PageInfo *pi, MDB_val *val) {
      size_t url_size = strlen(pi->url) + 1;
      val->mv_size =
 	  sizeof(pi->first_crawl) + sizeof(pi->last_crawl) + sizeof(pi->n_changes) +
@@ -138,10 +153,13 @@ page_info_dump(PageInfo *pi, MDB_val *val) {
      return 0;
 }
 
-// Create a new PageInfo loading the information from a previously
-// dumpled PageInfo inside val. Return pointer to the new PageInfo.
+/** Create a new PageInfo loading the information from a previously
+ * dumped PageInfo inside val.
+ *
+ * @return pointer to the new PageInfo or NULL if failure
+ */
 PageInfo *
-page_info_load(MDB_val *val) {
+page_info_load(const MDB_val *val) {
      PageInfo *pi = malloc(sizeof(*pi));
      char *data = val->mv_data;
      size_t i = 0;
@@ -171,7 +189,7 @@ page_info_load(MDB_val *val) {
      return pi;
 }
 
-// Destroy PageInfo
+/** Destroy PageInfo if not NULL, otherwise does nothing */
 void
 page_info_delete(PageInfo *pi) {
      if (pi != 0) {
@@ -180,28 +198,47 @@ page_info_delete(PageInfo *pi) {
 	  free(pi);
      }
 }
+/// @}
 
+/// @addtogroup PageDB
+/// @{
 
-// the "info" database stores a fixed amount of keys
-// this key points to the number of pages inside the database,
-// crawled or not. It is used to assign new IDs
+/** The "info" database stores a fixed amount of keys
+ * this key points to the number of pages inside the database,
+ * crawled or not. It is used to assign new IDs
+ */
 char info_n_pages[] = "n_pages";
 
 #define PAGE_DB_MAX_ERROR_LENGTH 10000
 #define PAGE_DB_DEFAULT_SIZE 100*MB
 
 typedef enum {
-     page_db_error_ok = 0,
-     page_db_error_memory,
-     page_db_error_invalid_path,
-     page_db_error_internal
+     page_db_error_ok = 0,       /**< No error */
+     page_db_error_memory,       /**< Error allocating memory */
+     page_db_error_invalid_path, /**< File system error */
+     page_db_error_internal      /**< Unexpected error */
 } PageDBError;
 
+/** Page database.
+ *
+ * We are really talking about 4 diferent key/value databases:
+ *   - info
+ *        Contains fixed size information about the whole database. Right now
+ *        it just contains the number pages stored.
+ *   - hash2idx
+ *        Maps URL hash to index. Indices are consecutive identifier for every
+ *        page. This allows to map pages to elements inside arrays.
+ *   - hash2info
+ *        Maps URL hash to a @ref PageInfo structure.
+ *   - links
+ *        Maps URL index to links indices. This allows us to make a fast streaming
+ *        of all links inside a database.
+ */
 typedef struct {
      MDB_env *env;
 
      PageDBError error;
-     // a descriptive message associated with error
+     /** A descriptive message associated with @ref error */
      char error_msg[PAGE_DB_MAX_ERROR_LENGTH+1];
 } PageDB;
 
@@ -226,7 +263,11 @@ page_db_add_error(PageDB *db, const char *msg) {
     page_db_add_error_aux(db, msg);
 }
 
-// Doubles database size
+/** Doubles database size.
+ *
+ * This function is automatically called when an operation cannot proceed because
+ * of insufficient allocated mmap memory.
+ */
 static PageDBError
 page_db_grow(PageDB *db) {
      MDB_envinfo info;
@@ -240,7 +281,19 @@ page_db_grow(PageDB *db) {
      return db->error;
 }
 
-// Creates a new database and stores data inside path
+/** Creates a new database and stores data inside path
+ *
+ * @param db In case of @ref ::page_db_error_memory *db could be NULL, otherwise
+ *           it is allocated memory so that the @ref PageDB::error_msg can be
+ *           accessed and its your responsability to call @ref page_db_delete.
+ *
+ * @param path Path to directory. In case it doesn't exist it will created.
+ *             If it exists and a database is already present operations will
+ *             resume with the existing database. Note that you must have read,
+ *             write and execute permissions for the directory.
+ *
+ * @return 0 if success, otherwise the error code
+ **/
 PageDBError
 page_db_new(PageDB **db, const char *path) {
      PageDB *p = *db = malloc(sizeof(*p));
@@ -318,7 +371,8 @@ page_db_new(PageDB **db, const char *path) {
      return p->error;
 }
 
-/* How to check if a page has been already been added to the database?
+/* TODO Move this comment to the benchmark.
+   How to check if a page has been already been added to the database?
    We cannot add URL's directly as keys since we need to setup a maximum
    key size. We could make key sizes long enough, say, 3000 characters but
    I have a bad feeling about that.
@@ -336,7 +390,7 @@ page_db_new(PageDB **db, const char *path) {
       2. Directly inserting the strings instead of hashes is MUCH faster (54M urls),
 	 but query performance is better with hashes:
 	 a. Average insert time:
-	      string: 7.1e-7
+	      string: 0.7e-6
 	      hash  : 5.1e-6
 	 b. Average query time:
 	      string: 3.0e-6
@@ -352,8 +406,17 @@ page_db_new(PageDB **db, const char *path) {
     more features.
 */
 
+/** Store a new or updated @ref PageInfo for a crawled page.
+ *
+ * @param cur An open cursor to the hash2info database
+ * @param key The key (hash) to the page
+ * @param page
+ * @param mdb_error In case of failure, if the error occurs inside LMDB this output parameter
+ *                  will be set with the error (otherwise is set to zero).
+ * @return 0 if success, -1 if failure.
+ */
 static int
-page_db_add_crawled_page_info(MDB_cursor *cur, MDB_val *key, CrawledPage *page, int *mdb_error) {
+page_db_add_crawled_page_info(MDB_cursor *cur, MDB_val *key, const CrawledPage *page, int *mdb_error) {
      MDB_val val;
      PageInfo *pi = 0;
 
@@ -391,6 +454,15 @@ on_error:
      return -1;
 }
 
+/** Store a new or updated @ref PageInfo for an uncrawled link.
+ *
+ * @param cur An open cursor to the hash2info database
+ * @param key The key (hash) to the page
+ * @param url
+ * @param mdb_error In case of failure, if the error occurs inside LMDB this output parameter
+ *                  will be set with the error (otherwise is set to zero).
+ * @return 0 if success, -1 if failure.
+ */
 static int
 page_db_add_link_page_info(MDB_cursor *cur, MDB_val *key, char *url, int *mdb_error) {
      MDB_val val;
@@ -415,8 +487,27 @@ on_error:
      return -1;
 }
 
+/** Update @ref PageDB with a new crawled page
+ *
+ * It perform the following actions:
+ * - Compute page hash
+ * - If the page is not already into the database:
+ *     - It generates a new ID and stores it in hash2idx
+ *     - It creates a new PageInfo and stores it in hash2info
+ * - If already present if updates the PageInfo inside hash2info
+ * - For each link:
+ *     - Compute hash
+ *     - If already present in the database just retrieves the ID
+ *     - If not present:
+ *         - Generate new ID and store it in hash2idx
+ *         - Creates a new PageInfo and stores it in hash2info
+ * - Create or overwrite list of Page ID -> Links ID mapping inside links
+ *   database
+ *
+ * @return 0 if success, otherwise the error code
+ */
 PageDBError
-page_db_add(PageDB *db, CrawledPage *page) {
+page_db_add(PageDB *db, const CrawledPage *page) {
      MDB_txn *txn;
      MDB_dbi dbi_hash2info;
      MDB_dbi dbi_hash2idx;
@@ -582,38 +673,43 @@ on_error:
 	  return db->error;
      }
 }
+/// @}
+
+
+/// @addtogroup LinkStream
+/// @{
 
 typedef struct {
      int64_t from;
      int64_t to;
-} Edge;
+} Link;
 
 typedef enum {
-     edge_stream_state_init,
-     edge_stream_state_next,
-     edge_stream_state_end,
-     edge_stream_state_error
-} EdgeStreamState;
+     link_stream_state_init, /**< Stream ready */
+     link_stream_state_next, /**< A new element has been obtained */
+     link_stream_state_end,  /**< No more elements */
+     link_stream_state_error /**< Unexpected error */
+} LinkStreamState;
 
 typedef struct {
-     MDB_cursor *cur;
+     MDB_cursor *cur; /**< Cursor to the links database */
 
-     uint64_t from;
-     uint64_t *to;
-     size_t n_to;
-     size_t i_to;
-     size_t m_to;
+     uint64_t from; /**< Current page */
+     uint64_t *to;  /**< A list of links */
+     size_t n_to;   /**< Number of links */
+     size_t i_to;   /**< Current position inside @ref to */
+     size_t m_to;   /**< Allocated memory for @ref to. It must be that @ref n_to <= @ref m_to. */
 
-     EdgeStreamState state;
-} EdgeStream;
+     LinkStreamState state;
+} LinkStream;
 
 static int
-edge_stream_copy_links(EdgeStream *es, MDB_val *key, MDB_val *val) {
+link_stream_copy_links(LinkStream *es, MDB_val *key, MDB_val *val) {
      es->n_to = val->mv_size/sizeof(uint64_t);
      es->i_to = 0;
      if (es->n_to > es->m_to) {
 	  if ((es->to = (uint64_t*)realloc(es->to, es->n_to*sizeof(uint64_t))) == 0) {
-	       es->state = edge_stream_state_error;
+	       es->state = link_stream_state_error;
 	       return -1;
 	  }
 	  es->m_to = es->n_to;
@@ -627,9 +723,15 @@ edge_stream_copy_links(EdgeStream *es, MDB_val *key, MDB_val *val) {
      return 0;
 }
 
+/** Create a new stream from the given PageDB.
+ *
+ * @param es The new stream or NULL
+ * @param db
+ * @return 0 if success, otherwise the error code.
+ */
 PageDBError
-edge_stream_new(EdgeStream **es, PageDB *db) {
-     EdgeStream *p = *es = calloc(1, sizeof(*p));
+link_stream_new(LinkStream **es, PageDB *db) {
+     LinkStream *p = *es = calloc(1, sizeof(*p));
      if (p == 0)
 	  return page_db_error_memory;
 
@@ -662,15 +764,15 @@ edge_stream_new(EdgeStream **es, PageDB *db) {
 
      switch (mdb_rc = mdb_cursor_get(p->cur, &key, &val, MDB_FIRST)) {
      case 0:
-	  p->state = edge_stream_state_init;
-	  if (edge_stream_copy_links(p, &key, &val) != 0)
-	       return page_db_error_internal;
+	  p->state = link_stream_state_init;
+	  if (link_stream_copy_links(p, &key, &val) != 0)
+	       return link_stream_state_error;
 	  break;
      case MDB_NOTFOUND:
-	  p->state = edge_stream_state_end;
+	  p->state = link_stream_state_end;
 	  break;
      default:
-	  p->state = edge_stream_state_error;
+	  p->state = link_stream_state_error;
 	  goto mdb_error;
      }
 
@@ -685,8 +787,12 @@ mdb_error:
      return db->error;
 }
 
-EdgeStreamState
-edge_stream_next(EdgeStream *es, Edge *edge) {
+/** Get next element inside stream.
+ * 
+ * @return @ref ::link_stream_state_next if success
+ */
+LinkStreamState
+link_stream_next(LinkStream *es, Link *link) {
      if (es->i_to == es->n_to) {
 	  int mdb_rc;
 	  MDB_val key;
@@ -694,28 +800,30 @@ edge_stream_next(EdgeStream *es, Edge *edge) {
 
 	  switch (mdb_rc = mdb_cursor_get(es->cur, &key, &val, MDB_NEXT)) {
 	  case 0:
-	       if (edge_stream_copy_links(es, &key, &val) != 0)
+	       if (link_stream_copy_links(es, &key, &val) != 0)
 		    return page_db_error_internal;
 	       break;
 	  case MDB_NOTFOUND:
-	       return es->state = edge_stream_state_end;
+	       return es->state = link_stream_state_end;
 	  default:
-	       return es->state = edge_stream_state_error;
+	       return es->state = link_stream_state_error;
 	  }
      }
-     es->state = edge_stream_state_next;
-     edge->from = es->from;
-     edge->to = es->to[es->i_to++];
+     es->state = link_stream_state_next;
+     link->from = es->from;
+     link->to = es->to[es->i_to++];
 
      return es->state;
 }
 
+/** Delete link stream and free any transaction hold inside the database. */
 void
-edge_stream_delete(EdgeStream *es) {
+link_stream_delete(LinkStream *es) {
      mdb_txn_abort(mdb_cursor_txn(es->cur));
      free(es->to);
      free(es);
 }
+/// @}
 
 int
 main(void) {
@@ -754,18 +862,18 @@ main(void) {
 	  exit(EXIT_FAILURE);
      }
 
-     EdgeStream *es;
-     if ((pdb_err = edge_stream_new(&es, db)) != 0) {
+     LinkStream *es;
+     if ((pdb_err = link_stream_new(&es, db)) != 0) {
 	  printf("%d %s\n", pdb_err, db->error_msg);
 	  exit(EXIT_FAILURE);
      }
-     if (es->state == edge_stream_state_init) {
-	  Edge edge;
-	  while (edge_stream_next(es, &edge) == edge_stream_state_next) {
-	       printf("%zu %zu\n", edge.from, edge.to);
+     if (es->state == link_stream_state_init) {
+	  Link link;
+	  while (link_stream_next(es, &link) == link_stream_state_next) {
+	       printf("%zu %zu\n", link.from, link.to);
 	  }
      }
-     edge_stream_delete(es);
+     link_stream_delete(es);
 
      return 0;
 }
