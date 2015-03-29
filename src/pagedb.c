@@ -34,6 +34,7 @@ typedef struct {
      char **links;                /**< Each links[i] is also a URL */
      size_t n_links;              /**< Number of links */
      time_t time;                 /**< UNIX time of the crawl */
+     float score;                 /**< A number giving an idea of the page content's value */
      char *content_hash;          /**< A hash to detect content change since last crawl. Arbitrary byte sequence */
      size_t content_hash_length;  /**< Number of byes of the content_hash */
 } CrawledPage;
@@ -47,6 +48,7 @@ typedef struct {
      time_t last_crawl;           /**< Last UNIX time this page was crawled */
      size_t n_changes;            /**< Number of content changes detected between first and last crawl */
      size_t n_crawls;             /**< Number of times this page has crawled. Can be zero if it has been observed just as a link*/
+     float score;                 /**< A copy of the same field at the last crawl */
      size_t content_hash_length;  /**< Number of bytes in @ref content_hash */
      char *content_hash;          /**< Byte sequence with the hash of the last crawl */
 } PageInfo;
@@ -54,6 +56,7 @@ typedef struct {
 
 /** Write printed representation of PageInfo.
 
+    This function is intended mainly for debugging and development.
     The representation is:
 	first_crawl last_crawl n_crawls n_changes url
 
@@ -67,7 +70,7 @@ typedef struct {
       therefore always 8 bytes length:
 	    1.21e+01
     - n_changes: The same as n_crawls
-    - url: This is the only varying in length field. However, it is truncated at
+    - url: This is the only variable length field. However, it is truncated at
       512 bytes length.
 
     @param pi The @ref PageInfo to be printed
@@ -79,10 +82,10 @@ page_info_print(const PageInfo *pi, char *out) {
      size_t i = 0;
      strncpy(out, ctime(&pi->first_crawl), 24);
      i += 24;
-     out[i++] = '|';                                        // i = 25
+     out[i++] = '|';                                      // i = 25
      strncpy(out + i, ctime(&pi->last_crawl), 24);
      i += 24;
-     out[i++] = '|';                                        // i = 50
+     out[i++] = '|';                                      // i = 50
      if (snprintf(out + i, 9, "%.2e", (double)pi->n_crawls) < 0)
 	  return -1;
      i += 8;
@@ -112,7 +115,7 @@ page_info_new_link(const char *link) {
 	  free(pi);
 	  return 0;
      }
-     strcpy(pi->url, link);
+     strcpy(pi->url, link);     
      return pi;
 }
 
@@ -136,7 +139,7 @@ page_info_new_crawled(const CrawledPage *cp) {
 	  return 0;
      }
      memcpy(pi->content_hash, cp->content_hash, cp->content_hash_length);
-
+     pi->score = cp->score;
      return pi;
 }
 
@@ -173,6 +176,7 @@ page_info_update(PageInfo *pi, const CrawledPage *cp) {
      }
      pi->n_crawls++;
      pi->last_crawl = cp->time;
+     pi->score = cp->score;
 
      return 0;
 }
@@ -189,7 +193,7 @@ page_info_dump(const PageInfo *pi, MDB_val *val) {
      size_t url_size = strlen(pi->url) + 1;
      val->mv_size =
 	  sizeof(pi->first_crawl) + sizeof(pi->last_crawl) + sizeof(pi->n_changes) +
-	  sizeof(pi->n_crawls) + sizeof(pi->content_hash_length) + url_size +
+	  sizeof(pi->n_crawls) + sizeof(pi->score) + sizeof(pi->content_hash_length) + url_size +
 	  pi->content_hash_length;
      char *data = val->mv_data = malloc(val->mv_size);
      if (!data)
@@ -203,6 +207,7 @@ page_info_dump(const PageInfo *pi, MDB_val *val) {
      PAGE_INFO_WRITE(pi->last_crawl);
      PAGE_INFO_WRITE(pi->n_changes);
      PAGE_INFO_WRITE(pi->n_crawls);
+     PAGE_INFO_WRITE(pi->score);
      PAGE_INFO_WRITE(pi->content_hash_length);
      for (j=0; j<url_size; data[i++] = pi->url[j++]);
      for (j=0; j<pi->content_hash_length; data[i++] = pi->content_hash[j++]);
@@ -227,6 +232,7 @@ page_info_load(const MDB_val *val) {
      PAGE_INFO_READ(pi->last_crawl);
      PAGE_INFO_READ(pi->n_changes);
      PAGE_INFO_READ(pi->n_crawls);
+     PAGE_INFO_READ(pi->score);
      PAGE_INFO_READ(pi->content_hash_length);
 
      size_t url_size = strlen(data + i) + 1;
@@ -275,6 +281,11 @@ typedef enum {
      page_db_error_invalid_path, /**< File system error */
      page_db_error_internal      /**< Unexpected error */
 } PageDBError;
+
+// TODO Make the building of the links database optional. The are many more links
+// that pages and it takes lot of space to store this structure. We should only
+// build the links database if we are going to use them, for example, to compute
+// PageRank or HITS scores.
 
 /** Page database.
  *
@@ -544,6 +555,55 @@ on_error:
      return -1;
 }
 
+int
+mdb_cmp_float(const MDB_val *a, const MDB_val *b) {
+     float x = *(float*)(a->mv_data);
+     float y = *(float*)(b->mv_data);
+     return x < y? -1: x > y? +1: 0;	       
+}
+
+static int
+page_db_open_cursor(MDB_txn *txn, 
+		    const char *db_name, 
+		    int flags, 
+		    MDB_cursor **cursor,
+		    MDB_cmp_func *func) {     
+     MDB_dbi dbi;
+     int mdb_rc =
+	  mdb_dbi_open(txn, db_name, flags, &dbi) ||
+	  (func && mdb_set_compare(txn, dbi, func)) ||
+	  mdb_cursor_open(txn, dbi, cursor);
+     if (mdb_rc != 0)
+	  *cursor = 0;
+     return mdb_rc;
+}
+
+static int
+page_db_open_hash2info(MDB_txn *txn, MDB_cursor **cursor) {
+     return page_db_open_cursor(txn, "hash2info", MDB_CREATE | MDB_INTEGERKEY, cursor, 0);
+}
+
+static int
+page_db_open_hash2idx(MDB_txn *txn, MDB_cursor **cursor) {
+     return page_db_open_cursor(txn, "hash2idx", MDB_CREATE | MDB_INTEGERKEY, cursor, 0);
+}
+
+static int
+page_db_open_links(MDB_txn *txn, MDB_cursor **cursor) {
+     return page_db_open_cursor(txn, "links", MDB_CREATE | MDB_INTEGERKEY, cursor, 0);
+}
+
+static int
+page_db_open_info(MDB_txn *txn, MDB_cursor **cursor) {
+     return page_db_open_cursor(txn, "info", 0, cursor, 0);
+}
+
+static int
+page_db_open_schedule(MDB_txn *txn, MDB_cursor **cursor) {
+     return page_db_open_cursor(txn, "schedule", MDB_CREATE, cursor, mdb_cmp_float);
+}
+
+
 /** Update @ref PageDB with a new crawled page
  *
  * It perform the following actions:
@@ -566,15 +626,12 @@ on_error:
 PageDBError
 page_db_add(PageDB *db, const CrawledPage *page) {
      MDB_txn *txn;
-     MDB_dbi dbi_hash2info;
-     MDB_dbi dbi_hash2idx;
-     MDB_dbi dbi_links;
-     MDB_dbi dbi_info;
 
      MDB_cursor *cur_hash2info;
      MDB_cursor *cur_hash2idx;
      MDB_cursor *cur_links;
      MDB_cursor *cur_info;
+     MDB_cursor *cur_schedule;
 
      MDB_val key;
      MDB_val val;
@@ -585,57 +642,18 @@ page_db_add(PageDB *db, const CrawledPage *page) {
 txn_start: // return here if the transaction is discarded and must be repeated
      error = 0;
      // start a new write transaction
-     const int flags = MDB_CREATE | MDB_INTEGERKEY;
      if ((mdb_rc = mdb_txn_begin(db->env, 0, 0, &txn)) != 0)
 	  error = "opening transaction";
-     // open cursor to hash2info database
-     else if ((mdb_rc = mdb_dbi_open(
-		    txn,
-		    "hash2info",
-		    flags,
-		    &dbi_hash2info)) != 0)
-	  error = "opening hash2info database";
-     else if ((mdb_rc = mdb_cursor_open(
-		    txn,
-		    dbi_hash2info,
-		    &cur_hash2info)) != 0)
+     else if ((mdb_rc = page_db_open_hash2info(txn, &cur_hash2info)) != 0)
 	  error = "opening hash2info cursor";
-     // open cursor to hash2idx database
-     else if ((mdb_rc = mdb_dbi_open(
-		    txn,
-		    "hash2idx",
-		    flags,
-		    &dbi_hash2idx)) != 0)
-	  error = "opening hash2idx database";
-     else if ((mdb_rc = mdb_cursor_open(
-		    txn,
-		    dbi_hash2idx,
-		    &cur_hash2idx)) != 0)
+     else if ((mdb_rc = page_db_open_hash2idx(txn, &cur_hash2idx)) != 0)
 	  error = "opening hash2idx cursor";
-     // open cursor to links database
-     else if ((mdb_rc = mdb_dbi_open(
-		    txn,
-		    "links",
-		    flags,
-		    &dbi_links)) != 0)
-	  error = "opening links database";
-     else if ((mdb_rc = mdb_cursor_open(
-		    txn,
-		    dbi_links,
-		    &cur_links)) != 0)
+     else if ((mdb_rc = page_db_open_links(txn, &cur_links)) != 0)
 	  error = "opening links cursor";
-     // open cursor to info database
-     else if ((mdb_rc = mdb_dbi_open(
-		    txn,
-		    "info",
-		    0,
-		    &dbi_info)) != 0)
-	  error = "opening info database";
-     else if ((mdb_rc = mdb_cursor_open(
-		    txn,
-		    dbi_info,
-		    &cur_info)) != 0)
+     else if ((mdb_rc = page_db_open_info(txn, &cur_info)) != 0)
 	  error = "opening info cursor";
+     else if ((mdb_rc = page_db_open_schedule(txn, &cur_schedule)) != 0)
+	  error = "opening schedule cursor";
 
      if (error != 0)
 	  goto on_error;
@@ -659,6 +677,10 @@ txn_start: // return here if the transaction is discarded and must be repeated
      }
 
      uint64_t *id = malloc((page->n_links + 1)*sizeof(*id));
+     if (!id) {
+	  error = "could not malloc";
+	  goto on_error;
+     }
      for (size_t i=0; i <= page->n_links; ++i) {
 	  char *link = i > 0? page->links[i - 1]: 0;
 	  if (link) {
@@ -958,6 +980,7 @@ main(void) {
 	  .links               = cp1_links,
 	  .n_links             = 3,
 	  .time                = time(0),
+	  .score               = 0.5,
 	  .content_hash        = 0,
 	  .content_hash_length = 0
      };
@@ -967,6 +990,7 @@ main(void) {
 	  .links               = cp2_links,
 	  .n_links             = 2,
 	  .time                = time(0),
+	  .score               = 0.2,
 	  .content_hash        = 0,
 	  .content_hash_length = 0
      };
