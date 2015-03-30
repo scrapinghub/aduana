@@ -702,7 +702,7 @@ page_db_get_info(PageDB *db, const char *url, PageInfo **pi) {
 	       .mv_data = &hash
 	  };
 	  MDB_val val;
-	  switch (mdb_rc = mdb_cursor_get(cur, &key, &val, 0)) {
+	  switch (mdb_rc = mdb_cursor_get(cur, &key, &val, MDB_SET)) {
 	  case 0:
 	       *pi = page_info_load(&val);
 	       if (!pi) {
@@ -758,7 +758,7 @@ page_db_request(PageDB *db, size_t n_pages, PageInfo **pi) {
 	  for (size_t i=0; i<n_pages; ++i)
 	       switch (mdb_rc = db->sched_get(cur_schedule, &hash)) {
 	       case 0:
-		    switch (mdb_rc = mdb_cursor_get(cur_hash2info, &hash, &val, 0)) {
+		    switch (mdb_rc = mdb_cursor_get(cur_hash2info, &hash, &val, MDB_SET)) {
 		    case 0:
 			 pi[i] = page_info_load(&val);
 			 if (!pi) {
@@ -927,13 +927,43 @@ link_stream_delete(LinkStream *es) {
 #include "CuTest.h"
 
 void
+test_page_info_serialization(CuTest *tc) {
+     MDB_val val;
+     PageInfo pi1 = {
+	  .url                 = "test_url_123",
+	  .first_crawl         = 123,
+	  .last_crawl          = 456,
+	  .n_changes           = 100,
+	  .n_crawls            = 20,
+	  .score               = 0.7,
+	  .content_hash_length = 8,
+	  .content_hash        = "1234567"
+     };
+
+     CuAssertTrue(tc, page_info_dump(&pi1, &val) == 0);
+     
+     PageInfo *pi2 = page_info_load(&val);
+     CuAssertPtrNotNull(tc, pi2);
+     
+     CuAssertStrEquals(tc, pi1.url, pi2->url);
+     CuAssertTrue(tc, pi1.first_crawl == pi2->first_crawl);
+     CuAssertTrue(tc, pi1.last_crawl == pi2->last_crawl);
+     CuAssertTrue(tc, pi1.n_changes == pi2->n_changes);
+     CuAssertTrue(tc, pi1.n_crawls == pi2->n_crawls);
+     CuAssertTrue(tc, pi1.score == pi2->score);
+     CuAssertTrue(tc, pi1.content_hash_length == pi2->content_hash_length);
+     CuAssertStrEquals(tc, pi1.content_hash, pi2->content_hash);
+
+     page_info_delete(pi2);
+}
+
+void
 test_page_db_simple(CuTest *tc) {
      PageDB *db;
-     PageDBError pdb_err = page_db_new(&db, "./test_pagedb");
-     if (pdb_err != 0) {
-	  printf("%d %s\n", pdb_err, db!=0? db->error_msg: "NULL");
-	  exit(EXIT_FAILURE);
-     }
+     CuAssert(tc, 
+	      db!=0? db->error_msg: "NULL", 
+	      page_db_new(&db, "./test_pagedb") == 0);
+
      char *cp1_links[] = {"a", "b", "www.google.com"};
      CrawledPage cp1 = {
 	  .url                 = "cp1",
@@ -955,44 +985,39 @@ test_page_db_simple(CuTest *tc) {
 	  .content_hash_length = 0
      };
 
-     if ((pdb_err = page_db_add(db, &cp1)) != 0) {
-	  printf("%d %s\n", pdb_err, db->error_msg);
-	  exit(EXIT_FAILURE);
-     }
-
-     if ((pdb_err = page_db_add(db, &cp2)) != 0) {
-	  printf("%d %s\n", pdb_err, db->error_msg);
-	  exit(EXIT_FAILURE);
-     }
+     CuAssert(tc, 
+	      db->error_msg, 
+	      page_db_add(db, &cp1) == 0);
+     CuAssert(tc, 
+	      db->error_msg, 
+	      page_db_add(db, &cp2) == 0);
 
      char pi_out[1000];
-     char *print_pages[] = {"cp1", "cp2", "www.google.com"};
+     char *print_pages[] = {"cp2", "www.google.com", "cp1"};
      for (size_t i=0; i<3; ++i) {
 	  PageInfo *pi;
-	  if ((pdb_err = page_db_get_info(db, print_pages[i], &pi)) != 0) {
-	       printf("%d %s\n", pdb_err, db->error_msg);
-	       exit(EXIT_FAILURE);
-	  }
-	  if (pi != 0) {
-	       page_info_print(pi, pi_out);
-	       page_info_delete(pi);
-	  } else {
-	       printf("Could not find page: %s\n", print_pages[i]);
-	  }
+	  CuAssert(tc, 
+		   db->error_msg, 
+		   page_db_get_info(db, print_pages[i], &pi) == 0);
 
+	  CuAssertPtrNotNull(tc, pi);
+
+	  page_info_print(pi, pi_out);
+	  page_info_delete(pi);
 	  printf("%s\n", pi_out);
      }
 
      LinkStream *es;
-     if ((pdb_err = link_stream_new(&es, db)) != 0) {
-	  printf("%d %s\n", pdb_err, db->error_msg);
-	  exit(EXIT_FAILURE);
-     }
+     CuAssert(tc, 
+	      db->error_msg, 
+	      link_stream_new(&es, db) == 0);
+
      if (es->state == link_stream_state_init) {
 	  Link link;
 	  while (link_stream_next(es, &link) == link_stream_state_next) {
 	       printf("%zu %zu\n", link.from, link.to);
 	  }
+	  CuAssertTrue(tc, es->state != link_stream_state_error);
      }
      link_stream_delete(es);
 
@@ -1003,6 +1028,7 @@ CuSuite *
 test_page_db_suite(void) {
      CuSuite *suite = CuSuiteNew();
      SUITE_ADD_TEST(suite, test_page_db_simple);
+     SUITE_ADD_TEST(suite, test_page_info_serialization);
 
      return suite;
 }
