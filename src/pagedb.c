@@ -13,10 +13,9 @@
 #include "lmdb.h"
 #include "xxhash.h"
 
-#define KB 1024LL
-#define MB (1024*KB)
-#define GB (1024*MB)
+#include "pagedb.h"
 
+// TODO delete?
 /** Print hexadecimal representation of hash.
 
 We assume that out has twice the length of the original hash to
@@ -28,55 +27,8 @@ hash_print(char *hash, size_t len, char *out) {
 	  sprintf(out + 2*i, "%02X", hash[i]);
 }
 
-/** The information that comes with a crawled page */
-typedef struct {
-     char *url;                   /**< ASCII, null terminated string for the page URL*/
-     char **links;                /**< Each links[i] is also a URL */
-     size_t n_links;              /**< Number of links */
-     time_t time;                 /**< UNIX time of the crawl */
-     float score;                 /**< A number giving an idea of the page content's value */
-     char *content_hash;          /**< A hash to detect content change since last crawl. Arbitrary byte sequence */
-     size_t content_hash_length;  /**< Number of byes of the content_hash */
-} CrawledPage;
-
 /// @addtogroup PageInfo
 /// @{
-/** The information we keep about crawled and uncrawled pages */
-typedef struct {
-     char *url;                   /**< A copy of either @ref CrawledPage::url or @ref CrawledPage::links[i] */
-     time_t first_crawl;          /**< First UNIX time this page was crawled */
-     time_t last_crawl;           /**< Last UNIX time this page was crawled */
-     size_t n_changes;            /**< Number of content changes detected between first and last crawl */
-     size_t n_crawls;             /**< Number of times this page has crawled. Can be zero if it has been observed just as a link*/
-     float score;                 /**< A copy of the same field at the last crawl */
-     size_t content_hash_length;  /**< Number of bytes in @ref content_hash */
-     char *content_hash;          /**< Byte sequence with the hash of the last crawl */
-} PageInfo;
-
-
-/** Write printed representation of PageInfo.
-
-    This function is intended mainly for debugging and development.
-    The representation is:
-	first_crawl last_crawl n_crawls n_changes url
-
-    Each field is separated with an space. The string is null terminated.
-    We use the following format for each field:
-    - first_crawl: the standard fixed size (24 bytes) as output by ctime.
-      For example: Mon Jan 1 08:01:59 2015
-    - last_crawl: the same as first_crawl
-    - n_crawls: To ensure fixed size representation this value is converted
-      to double and represented in exponential notation with two digits. It has
-      therefore always 8 bytes length:
-	    1.21e+01
-    - n_changes: The same as n_crawls
-    - url: This is the only variable length field. However, it is truncated at
-      512 bytes length.
-
-    @param pi The @ref PageInfo to be printed
-    @param out The output buffer, which must be at least 580 bytes long
-    @return size of representation or -1 if error
-*/
 int
 page_info_print(const PageInfo *pi, char *out) {
      size_t i = 0;
@@ -105,7 +57,7 @@ page_info_print(const PageInfo *pi, char *out) {
  *
  * @return A pointer to the new structure or NULL if failure
  */
-PageInfo *
+static PageInfo *
 page_info_new_link(const char *link) {
      PageInfo *pi = calloc(1, sizeof(*pi));
      if (!pi)
@@ -123,7 +75,7 @@ page_info_new_link(const char *link) {
  *
  * @return A pointer to the new structure or NULL if failure
  */
-PageInfo *
+static PageInfo *
 page_info_new_crawled(const CrawledPage *cp) {
      PageInfo *pi = page_info_new_link(cp->url);
      if (!pi)
@@ -147,7 +99,7 @@ page_info_new_crawled(const CrawledPage *cp) {
  *
  * @return 0 if success, -1 if failure
  */
-int
+static int
 page_info_update(PageInfo *pi, const CrawledPage *cp) {
      // Unmodified fields:
      //     url
@@ -188,7 +140,7 @@ page_info_update(PageInfo *pi, const CrawledPage *cp) {
  *
  * @return 0 if success, -1 if failure.
  */
-int
+static int
 page_info_dump(const PageInfo *pi, MDB_val *val) {
      size_t url_size = strlen(pi->url) + 1;
      val->mv_size =
@@ -220,7 +172,7 @@ page_info_dump(const PageInfo *pi, MDB_val *val) {
  *
  * @return pointer to the new PageInfo or NULL if failure
  */
-PageInfo *
+static PageInfo *
 page_info_load(const MDB_val *val) {
      PageInfo *pi = malloc(sizeof(*pi));
      char *data = val->mv_data;
@@ -252,7 +204,6 @@ page_info_load(const MDB_val *val) {
      return pi;
 }
 
-/** Destroy PageInfo if not NULL, otherwise does nothing */
 void
 page_info_delete(PageInfo *pi) {
      if (pi != 0) {
@@ -270,45 +221,31 @@ page_info_delete(PageInfo *pi) {
  * this key points to the number of pages inside the database,
  * crawled or not. It is used to assign new IDs
  */
-char info_n_pages[] = "n_pages";
+static char info_n_pages[] = "n_pages";
 
-#define PAGE_DB_MAX_ERROR_LENGTH 10000
-#define PAGE_DB_DEFAULT_SIZE 100*MB
+/** Best First Search scheduler: add new page */
+int
+bfs_add(MDB_cursor *cur, MDB_val *hash, PageInfo *pi) {
+     int mdb_rc = 0;
+     if (pi->n_crawls == 0) {
+	  MDB_val key = {
+	       .mv_size = sizeof(pi->score),
+	       .mv_data = &pi->score
+	  };
+	  mdb_rc = mdb_cursor_put(cur, &key, hash, 0);
+     }
+     return mdb_rc;
+}
 
-typedef enum {
-     page_db_error_ok = 0,       /**< No error */
-     page_db_error_memory,       /**< Error allocating memory */
-     page_db_error_invalid_path, /**< File system error */
-     page_db_error_internal      /**< Unexpected error */
-} PageDBError;
-
-// TODO Make the building of the links database optional. The are many more links
-// that pages and it takes lot of space to store this structure. We should only
-// build the links database if we are going to use them, for example, to compute
-// PageRank or HITS scores.
-
-/** Page database.
- *
- * We are really talking about 4 diferent key/value databases:
- *   - info
- *        Contains fixed size information about the whole database. Right now
- *        it just contains the number pages stored.
- *   - hash2idx
- *        Maps URL hash to index. Indices are consecutive identifier for every
- *        page. This allows to map pages to elements inside arrays.
- *   - hash2info
- *        Maps URL hash to a @ref PageInfo structure.
- *   - links
- *        Maps URL index to links indices. This allows us to make a fast streaming
- *        of all links inside a database.
- */
-typedef struct {
-     MDB_env *env;
-
-     PageDBError error;
-     /** A descriptive message associated with @ref error */
-     char error_msg[PAGE_DB_MAX_ERROR_LENGTH+1];
-} PageDB;
+/** Best First Search scheduler: retrieve next page to crawl */
+int
+bfs_get(MDB_cursor *cur, MDB_val *hash) {
+     MDB_val key;
+     return
+	  mdb_cursor_get(cur, &key, hash, MDB_FIRST) ||
+	  mdb_cursor_del(cur, 0);
+     
+}
 
 static void
 page_db_set_error(PageDB *db, int error, const char *msg) {
@@ -349,19 +286,6 @@ page_db_grow(PageDB *db) {
      return db->error;
 }
 
-/** Creates a new database and stores data inside path
- *
- * @param db In case of @ref ::page_db_error_memory *db could be NULL, otherwise
- *           it is allocated memory so that the @ref PageDB::error_msg can be
- *           accessed and its your responsability to call @ref page_db_delete.
- *
- * @param path Path to directory. In case it doesn't exist it will created.
- *             If it exists and a database is already present operations will
- *             resume with the existing database. Note that you must have read,
- *             write and execute permissions for the directory.
- *
- * @return 0 if success, otherwise the error code
- **/
 PageDBError
 page_db_new(PageDB **db, const char *path) {
      PageDB *p = *db = malloc(sizeof(*p));
@@ -369,6 +293,8 @@ page_db_new(PageDB **db, const char *path) {
 	  return page_db_error_memory;
      p->error = page_db_error_ok;
      p->error_msg[0] = '\0';
+     p->sched_add = bfs_add;
+     p->sched_get = bfs_get;
 
      const char *error = 0;
      // create directory if not present yet
@@ -399,7 +325,7 @@ page_db_new(PageDB **db, const char *path) {
 	  error = "creating environment";
      else if ((mdb_rc = mdb_env_set_mapsize(p->env, PAGE_DB_DEFAULT_SIZE)) != 0)
 	  error = "setting map size";
-     else if ((mdb_rc = mdb_env_set_maxdbs(p->env, 4)) != 0)
+     else if ((mdb_rc = mdb_env_set_maxdbs(p->env, 5)) != 0)
 	  error = "setting number of databases";
      else if ((mdb_rc = mdb_env_open(p->env, path, 0, 0664) != 0))
 	  error = "opening environment";
@@ -484,9 +410,13 @@ page_db_new(PageDB **db, const char *path) {
  * @return 0 if success, -1 if failure.
  */
 static int
-page_db_add_crawled_page_info(MDB_cursor *cur, MDB_val *key, const CrawledPage *page, int *mdb_error) {
+page_db_add_crawled_page_info(MDB_cursor *cur, 
+			      MDB_val *key, 
+			      const CrawledPage *page, 
+			      PageInfo **page_info,
+			      int *mdb_error) {
      MDB_val val;
-     PageInfo *pi = 0;
+     PageInfo *pi = *page_info = 0;
 
      int mdb_rc = mdb_cursor_get(cur, key, &val, MDB_SET);
      int put_flags = 0;
@@ -513,7 +443,6 @@ page_db_add_crawled_page_info(MDB_cursor *cur, MDB_val *key, const CrawledPage *
 	  goto on_error;
 
      *mdb_error = 0;
-     page_info_delete(pi);
      return 0;
 
 on_error:
@@ -532,11 +461,15 @@ on_error:
  * @return 0 if success, -1 if failure.
  */
 static int
-page_db_add_link_page_info(MDB_cursor *cur, MDB_val *key, char *url, int *mdb_error) {
+page_db_add_link_page_info(MDB_cursor *cur, 
+			   MDB_val *key, 
+			   char *url, 
+			   PageInfo **page_info,
+			   int *mdb_error) {
      MDB_val val;
      int mdb_rc = 0;
 
-     PageInfo *pi = page_info_new_link(url);
+     PageInfo *pi = *page_info = page_info_new_link(url);
      if (!pi)
 	  goto on_error;
 
@@ -547,7 +480,6 @@ page_db_add_link_page_info(MDB_cursor *cur, MDB_val *key, char *url, int *mdb_er
 	  goto on_error;
 
      *mdb_error = 0;
-     page_info_delete(pi);
      return 0;
 on_error:
      *mdb_error = mdb_rc;
@@ -555,7 +487,7 @@ on_error:
      return -1;
 }
 
-int
+static int
 mdb_cmp_float(const MDB_val *a, const MDB_val *b) {
      float x = *(float*)(a->mv_data);
      float y = *(float*)(b->mv_data);
@@ -580,17 +512,20 @@ page_db_open_cursor(MDB_txn *txn,
 
 static int
 page_db_open_hash2info(MDB_txn *txn, MDB_cursor **cursor) {
-     return page_db_open_cursor(txn, "hash2info", MDB_CREATE | MDB_INTEGERKEY, cursor, 0);
+     return page_db_open_cursor(
+	  txn, "hash2info", MDB_CREATE | MDB_INTEGERKEY, cursor, 0);
 }
 
 static int
 page_db_open_hash2idx(MDB_txn *txn, MDB_cursor **cursor) {
-     return page_db_open_cursor(txn, "hash2idx", MDB_CREATE | MDB_INTEGERKEY, cursor, 0);
+     return page_db_open_cursor(
+	  txn, "hash2idx", MDB_CREATE | MDB_INTEGERKEY, cursor, 0);
 }
 
 static int
 page_db_open_links(MDB_txn *txn, MDB_cursor **cursor) {
-     return page_db_open_cursor(txn, "links", MDB_CREATE | MDB_INTEGERKEY, cursor, 0);
+     return page_db_open_cursor(
+	  txn, "links", MDB_CREATE | MDB_INTEGERKEY, cursor, 0);
 }
 
 static int
@@ -600,29 +535,10 @@ page_db_open_info(MDB_txn *txn, MDB_cursor **cursor) {
 
 static int
 page_db_open_schedule(MDB_txn *txn, MDB_cursor **cursor) {
-     return page_db_open_cursor(txn, "schedule", MDB_CREATE, cursor, mdb_cmp_float);
+     return page_db_open_cursor(
+	  txn, "schedule", MDB_CREATE | MDB_DUPSORT, cursor, mdb_cmp_float);
 }
 
-
-/** Update @ref PageDB with a new crawled page
- *
- * It perform the following actions:
- * - Compute page hash
- * - If the page is not already into the database:
- *     - It generates a new ID and stores it in hash2idx
- *     - It creates a new PageInfo and stores it in hash2info
- * - If already present if updates the PageInfo inside hash2info
- * - For each link:
- *     - Compute hash
- *     - If already present in the database just retrieves the ID
- *     - If not present:
- *         - Generate new ID and store it in hash2idx
- *         - Creates a new PageInfo and stores it in hash2info
- * - Create or overwrite list of Page ID -> Links ID mapping inside links
- *   database
- *
- * @return 0 if success, otherwise the error code
- */
 PageDBError
 page_db_add(PageDB *db, const CrawledPage *page) {
      MDB_txn *txn;
@@ -671,10 +587,17 @@ txn_start: // return here if the transaction is discarded and must be repeated
      uint64_t hash = XXH64(page->url, strlen(page->url), 0);
      key.mv_size = sizeof(uint64_t);
      key.mv_data = &hash;
-     if (page_db_add_crawled_page_info(cur_hash2info, &key, page, &mdb_rc) != 0) {
+
+     PageInfo *pi;
+     if (page_db_add_crawled_page_info(cur_hash2info, &key, page, &pi, &mdb_rc) != 0) {
 	  error = "adding/updating page info";
 	  goto on_error;
      }
+     if (pi != 0 && (mdb_rc = db->sched_add(cur_schedule, &key, pi) != 0)) {
+	  error = "scheduling page";
+	  goto on_error;	  
+     }
+     page_info_delete(pi);
 
      uint64_t *id = malloc((page->n_links + 1)*sizeof(*id));
      if (!id) {
@@ -699,10 +622,15 @@ txn_start: // return here if the transaction is discarded and must be repeated
 	  case 0:
 	       id[i] = n_pages++;
 	       if (link) {
-		    if (page_db_add_link_page_info(cur_hash2info, &key, link, &mdb_rc) != 0) {
+		    if (page_db_add_link_page_info(cur_hash2info, &key, link, &pi, &mdb_rc) != 0) {
 			 error = "adding/updating link info";
 			 goto on_error;
 		    }
+		    if (pi != 0 && (mdb_rc = db->sched_add(cur_schedule, &key, pi) != 0)) {
+			 error = "scheduling page";
+			 goto on_error;	  
+		    }
+		    page_info_delete(pi);
 	       }
 	       break;
 	  default:
@@ -753,26 +681,17 @@ on_error:
      }
 }
 
-/** Retrieve the PageInfo stored inside the database.
-
-    Beware that if not found it will signal success but the PageInfo will be
-    NULL
- */
 PageDBError
 page_db_get_info(PageDB *db, const char *url, PageInfo **pi) {
      MDB_txn *txn;
-     MDB_dbi dbi;
+     MDB_cursor *cur;
 
      int mdb_rc;
      char *error = 0;
      if ((mdb_rc = mdb_txn_begin(db->env, 0, MDB_RDONLY, &txn)) != 0)
 	  error = "opening transaction";
      // open hash2info database
-     else if ((mdb_rc = mdb_dbi_open(
-		    txn,
-		    "hash2info",
-		    MDB_CREATE | MDB_INTEGERKEY,
-		    &dbi)) != 0) {
+     else if ((mdb_rc = page_db_open_hash2info(txn, &cur)) != 0) {
 	  error = "opening hash2info database";
 	  goto on_error;
      }
@@ -783,7 +702,7 @@ page_db_get_info(PageDB *db, const char *url, PageInfo **pi) {
 	       .mv_data = &hash
 	  };
 	  MDB_val val;
-	  switch (mdb_rc = mdb_get(txn, dbi, &key, &val)) {
+	  switch (mdb_rc = mdb_cursor_get(cur, &key, &val, 0)) {
 	  case 0:
 	       *pi = page_info_load(&val);
 	       if (!pi) {
@@ -814,35 +733,84 @@ on_error:
      return db->error;
 }
 
+PageDBError
+page_db_request(PageDB *db, size_t n_pages, PageInfo **pi) {
+     MDB_txn *txn;
+     MDB_cursor *cur_hash2info;
+     MDB_cursor *cur_schedule;
+
+     int mdb_rc;
+     char *error = 0;
+     if ((mdb_rc = mdb_txn_begin(db->env, 0, 0, &txn)) != 0)
+	  error = "opening transaction";
+     // open hash2info database
+     else if ((mdb_rc = page_db_open_hash2info(txn, &cur_hash2info)) != 0) {
+	  error = "opening hash2info database";
+	  goto on_error;
+     }
+     else if ((mdb_rc = page_db_open_schedule(txn, &cur_schedule)) != 0) {
+	  error = "opening schedule database";
+	  goto on_error;
+     }
+     else {
+	  MDB_val hash;	  
+	  MDB_val val;
+	  for (size_t i=0; i<n_pages; ++i)
+	       switch (mdb_rc = db->sched_get(cur_schedule, &hash)) {
+	       case 0:
+		    switch (mdb_rc = mdb_cursor_get(cur_hash2info, &hash, &val, 0)) {
+		    case 0:
+			 pi[i] = page_info_load(&val);
+			 if (!pi) {
+			      error = "deserializing data from database";
+			      goto on_error;
+			 }
+			 break;
+		    default:
+			 error = "retrieving val from hash2info";
+			 goto on_error;
+			 break;
+		    }
+
+		    break;
+	       case MDB_NOTFOUND: // no more pages left
+		    pi[i] = 0;
+		    goto all_pages_retrieved;
+	       default:
+		    error = "retrieving page to schedule";
+		    goto on_error;
+	       }
+     }
+
+all_pages_retrieved:
+     if ((mdb_rc = mdb_txn_commit(txn)) != 0) {
+	  error = "commiting scheduler transaction";
+	  goto on_error;
+     }
+     return 0;
+
+on_error:
+     page_db_set_error(db, page_db_error_internal, __func__);
+     if (error != 0)
+	  page_db_add_error(db, error);
+     if (mdb_rc != 0)
+	  page_db_add_error(db, mdb_strerror(mdb_rc));
+
+     return db->error;
+}
+
+/** Close database */
+void
+page_db_delete(PageDB *db) {
+     mdb_env_close(db->env);
+     free(db);
+}
+
 /// @}
 
 
 /// @addtogroup LinkStream
 /// @{
-
-typedef struct {
-     int64_t from;
-     int64_t to;
-} Link;
-
-typedef enum {
-     link_stream_state_init, /**< Stream ready */
-     link_stream_state_next, /**< A new element has been obtained */
-     link_stream_state_end,  /**< No more elements */
-     link_stream_state_error /**< Unexpected error */
-} LinkStreamState;
-
-typedef struct {
-     MDB_cursor *cur; /**< Cursor to the links database */
-
-     uint64_t from; /**< Current page */
-     uint64_t *to;  /**< A list of links */
-     size_t n_to;   /**< Number of links */
-     size_t i_to;   /**< Current position inside @ref to */
-     size_t m_to;   /**< Allocated memory for @ref to. It must be that @ref n_to <= @ref m_to. */
-
-     LinkStreamState state;
-} LinkStream;
 
 static int
 link_stream_copy_links(LinkStream *es, MDB_val *key, MDB_val *val) {
@@ -864,12 +832,6 @@ link_stream_copy_links(LinkStream *es, MDB_val *key, MDB_val *val) {
      return 0;
 }
 
-/** Create a new stream from the given PageDB.
- *
- * @param es The new stream or NULL
- * @param db
- * @return 0 if success, otherwise the error code.
- */
 PageDBError
 link_stream_new(LinkStream **es, PageDB *db) {
      LinkStream *p = *es = calloc(1, sizeof(*p));
@@ -928,10 +890,6 @@ mdb_error:
      return db->error;
 }
 
-/** Get next element inside stream.
- *
- * @return @ref ::link_stream_state_next if success
- */
 LinkStreamState
 link_stream_next(LinkStream *es, Link *link) {
      if (es->i_to == es->n_to) {
@@ -957,7 +915,6 @@ link_stream_next(LinkStream *es, Link *link) {
      return es->state;
 }
 
-/** Delete link stream and free any transaction hold inside the database. */
 void
 link_stream_delete(LinkStream *es) {
      mdb_txn_abort(mdb_cursor_txn(es->cur));
@@ -966,8 +923,11 @@ link_stream_delete(LinkStream *es) {
 }
 /// @}
 
-int
-main(void) {
+#if TEST
+#include "CuTest.h"
+
+void
+test_page_db_simple(CuTest *tc) {
      PageDB *db;
      PageDBError pdb_err = page_db_new(&db, "./test_pagedb");
      if (pdb_err != 0) {
@@ -1036,5 +996,14 @@ main(void) {
      }
      link_stream_delete(es);
 
-     return 0;
+     page_db_delete(db);
 }
+
+CuSuite *
+test_page_db_suite(void) {
+     CuSuite *suite = CuSuiteNew();
+     SUITE_ADD_TEST(suite, test_page_db_simple);
+
+     return suite;
+}
+#endif // TEST

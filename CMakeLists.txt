@@ -29,10 +29,12 @@ include_directories(
 
 # Common code
 ############################################################
-add_library(util STATIC
+add_library(pagedb STATIC
   src/mmap_array.c
+  src/pagedb.c
 )
 include_directories(src)
+target_link_libraries(pagedb lmdb xxhash)
 
 # Benchmarks
 #############################################################
@@ -68,12 +70,15 @@ add_executable(page_rank test/benchmark/page_rank.c)
 add_executable(hits test/benchmark/hits.c)
 
 target_link_libraries(edge_stream lz4)
-target_link_libraries(page_rank util edge_stream)
-target_link_libraries(hits util edge_stream)
+target_link_libraries(page_rank pagedb edge_stream)
+target_link_libraries(hits pagedb edge_stream)
 target_link_libraries(urldb hat-trie lmdb xxhash)
 
-# PageDB
-###############################################################
-add_executable(pagedb src/pagedb.c)
-target_link_libraries(pagedb lmdb xxhash)
-
+# Tests
+#############################################################
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+  add_definitions(-DTEST)
+  include_directories(test)
+  add_executable(test test/CuTest.c test/test.c)
+  target_link_libraries(test pagedb)
+endif()
