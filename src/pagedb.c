@@ -15,6 +15,20 @@
 
 #include "pagedb.h"
 
+char *
+build_path(const char *path, const char *fname) {
+     size_t plen = strlen(path);
+     size_t flen = strlen(fname);
+     char *fp = malloc(plen + flen + 2);
+     if (fp) {
+	  memcpy(fp, path, plen);
+	  fp[plen] = '/';
+	  memcpy(fp + plen + 1, fname, flen);
+	  fp[plen + flen + 1] = '\0';
+     }
+     return fp;
+}
+
 // TODO delete?
 /** Print hexadecimal representation of hash.
 
@@ -809,11 +823,11 @@ page_db_delete(PageDB *db) {
 /// @}
 
 
-/// @addtogroup LinkStream
+/// @addtogroup PageDBLinkStream
 /// @{
 
 static int
-link_stream_copy_links(LinkStream *es, MDB_val *key, MDB_val *val) {
+page_db_link_stream_copy_links(PageDBLinkStream *es, MDB_val *key, MDB_val *val) {
      es->n_to = val->mv_size/sizeof(uint64_t);
      es->i_to = 0;
      if (es->n_to > es->m_to) {
@@ -833,15 +847,13 @@ link_stream_copy_links(LinkStream *es, MDB_val *key, MDB_val *val) {
 }
 
 PageDBError
-link_stream_new(LinkStream **es, PageDB *db) {
-     LinkStream *p = *es = calloc(1, sizeof(*p));
+page_db_link_stream_new(PageDBLinkStream **es, PageDB *db) {
+     PageDBLinkStream *p = *es = calloc(1, sizeof(*p));
      if (p == 0)
 	  return page_db_error_memory;
 
      MDB_txn *txn;
      MDB_dbi dbi_links;
-     MDB_val key;
-     MDB_val val;
 
      int mdb_rc = 0;
      char *error = 0;
@@ -865,17 +877,8 @@ link_stream_new(LinkStream **es, PageDB *db) {
      if (error != 0)
 	  goto mdb_error;
 
-     switch (mdb_rc = mdb_cursor_get(p->cur, &key, &val, MDB_FIRST)) {
-     case 0:
-	  p->state = link_stream_state_init;
-	  if (link_stream_copy_links(p, &key, &val) != 0)
-	       return link_stream_state_error;
-	  break;
-     case MDB_NOTFOUND:
-	  p->state = link_stream_state_end;
-	  break;
-     default:
-	  p->state = link_stream_state_error;
+     if (page_db_link_stream_reset(p) == link_stream_state_error) {
+	  error = "reseting stream";
 	  goto mdb_error;
      }
 
@@ -885,13 +888,36 @@ mdb_error:
      page_db_set_error(db, page_db_error_internal, __func__);
      if (error != 0)
 	  page_db_add_error(db, error);
-     page_db_add_error(db, mdb_strerror(mdb_rc));
+     if (mdb_rc != 0)
+	  page_db_add_error(db, mdb_strerror(mdb_rc));
 
      return db->error;
 }
 
 LinkStreamState
-link_stream_next(LinkStream *es, Link *link) {
+page_db_link_stream_reset(PageDBLinkStream *es) {
+     int mdb_rc;
+     MDB_val key;
+     MDB_val val;
+
+     switch (mdb_rc = mdb_cursor_get(es->cur, &key, &val, MDB_FIRST)) {
+     case 0:
+	  es->state = link_stream_state_init;
+	  if (page_db_link_stream_copy_links(es, &key, &val) != 0)
+	       return link_stream_state_error;
+	  break;
+     case MDB_NOTFOUND:
+	  es->state = link_stream_state_end;
+	  break;
+     default:
+	  es->state = link_stream_state_error;
+	  break;
+     }
+     return es->state;
+}
+
+LinkStreamState
+page_db_link_stream_next(PageDBLinkStream *es, Link *link) {
      if (es->i_to == es->n_to) {
 	  int mdb_rc;
 	  MDB_val key;
@@ -899,7 +925,7 @@ link_stream_next(LinkStream *es, Link *link) {
 
 	  switch (mdb_rc = mdb_cursor_get(es->cur, &key, &val, MDB_NEXT)) {
 	  case 0:
-	       if (link_stream_copy_links(es, &key, &val) != 0)
+	       if (page_db_link_stream_copy_links(es, &key, &val) != 0)
 		    return page_db_error_internal;
 	       break;
 	  case MDB_NOTFOUND:
@@ -916,7 +942,7 @@ link_stream_next(LinkStream *es, Link *link) {
 }
 
 void
-link_stream_delete(LinkStream *es) {
+page_db_link_stream_delete(PageDBLinkStream *es) {
      mdb_txn_abort(mdb_cursor_txn(es->cur));
      free(es->to);
      free(es);
@@ -959,10 +985,20 @@ test_page_info_serialization(CuTest *tc) {
 
 void
 test_page_db_simple(CuTest *tc) {
+     char test_dir[] = "test-pagedb-XXXXXX";
+     mkdtemp(test_dir);
+     char data[] = "test-pagedb-XXXXXX/data.mdb";
+     char lock[] = "test-pagedb-XXXXXX/lock.mdb";
+     for (size_t i=0; 
+	  test_dir[i] != 0; 
+	  i++) {
+	  data[i] = lock[i] = test_dir[i];
+     }
+
      PageDB *db;
      CuAssert(tc, 
 	      db!=0? db->error_msg: "NULL", 
-	      page_db_new(&db, "./test_pagedb") == 0);
+	      page_db_new(&db, test_dir) == 0);
 
      char *cp1_links[] = {"a", "b", "www.google.com"};
      CrawledPage cp1 = {
@@ -1007,21 +1043,25 @@ test_page_db_simple(CuTest *tc) {
 	  printf("%s\n", pi_out);
      }
 
-     LinkStream *es;
+     PageDBLinkStream *es;
      CuAssert(tc, 
 	      db->error_msg, 
-	      link_stream_new(&es, db) == 0);
+	      page_db_link_stream_new(&es, db) == 0);
 
      if (es->state == link_stream_state_init) {
 	  Link link;
-	  while (link_stream_next(es, &link) == link_stream_state_next) {
+	  while (page_db_link_stream_next(es, &link) == link_stream_state_next) {
 	       printf("%zu %zu\n", link.from, link.to);
 	  }
 	  CuAssertTrue(tc, es->state != link_stream_state_error);
      }
-     link_stream_delete(es);
+     page_db_link_stream_delete(es);
 
      page_db_delete(db);
+     
+     remove(data);
+     remove(lock);
+     remove(test_dir);
 }
 
 CuSuite *

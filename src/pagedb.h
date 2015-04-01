@@ -90,9 +90,9 @@ typedef enum {
 } PageDBError;
 
 /** Function to call when a PageInfo is modified */
-typedef int (scheduler_add)(MDB_cursor *cur, MDB_val *hash, PageInfo *pi);
+typedef int (SchedulerAddFunc)(MDB_cursor *cur, MDB_val *hash, PageInfo *pi);
 /** Function to call to retrieve a new page */
-typedef int (scheduler_get)(MDB_cursor *cur, MDB_val *hash);
+typedef int (SchedulerGetFunc)(MDB_cursor *cur, MDB_val *hash);
 
 // TODO Make the building of the links database optional. The are many more links
 // that pages and it takes lot of space to store this structure. We should only
@@ -119,8 +119,8 @@ typedef int (scheduler_get)(MDB_cursor *cur, MDB_val *hash);
 typedef struct {
      MDB_env *env;
 
-     scheduler_add *sched_add;
-     scheduler_get *sched_get;
+     SchedulerAddFunc *sched_add;
+     SchedulerGetFunc *sched_get;
 
      PageDBError error;
      /** A descriptive message associated with @ref error */
@@ -192,6 +192,7 @@ page_db_delete(PageDB *db);
 
 /// @addtogroup LinkStream
 /// @{
+
 typedef struct {
      int64_t from;
      int64_t to;
@@ -204,6 +205,9 @@ typedef enum {
      link_stream_state_error /**< Unexpected error */
 } LinkStreamState;
 
+typedef LinkStreamState (LinkStreamNextFunc)(void *state, Link *link);
+typedef LinkStreamState (LinkStreamResetFunc)(void *state);
+
 typedef struct {
      MDB_cursor *cur; /**< Cursor to the links database */
 
@@ -214,7 +218,7 @@ typedef struct {
      size_t m_to;   /**< Allocated memory for @ref to. It must be that @ref n_to <= @ref m_to. */
 
      LinkStreamState state;
-} LinkStream;
+} PageDBLinkStream;
 
 /** Create a new stream from the given PageDB.
  *
@@ -223,19 +227,26 @@ typedef struct {
  * @return 0 if success, otherwise the error code.
  */
 PageDBError
-link_stream_new(LinkStream **es, PageDB *db);
+page_db_link_stream_new(PageDBLinkStream **es, PageDB *db);
+
+/** Rewind stream to the beginning */
+LinkStreamState
+page_db_link_stream_reset(PageDBLinkStream *es);
 
 /** Get next element inside stream.
  *
  * @return @ref ::link_stream_state_next if success
  */
 LinkStreamState
-link_stream_next(LinkStream *es, Link *link);
+page_db_link_stream_next(PageDBLinkStream *es, Link *link);
 
 /** Delete link stream and free any transaction hold inside the database. */
 void
-link_stream_delete(LinkStream *es);
+page_db_link_stream_delete(PageDBLinkStream *es);
 /// @}
+
+char *
+build_path(const char *path, const char *fname);
 
 #if TEST
 #include "CuTest.h"

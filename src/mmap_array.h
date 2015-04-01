@@ -4,52 +4,90 @@
 #define MMAP_ARRAY_MAX_ERROR_LENGTH 10000
 
 typedef enum {
-     mmap_array_error_ok = 0,
-     mmap_array_error_internal,
-     mmap_array_error_mmap,
-     mmap_array_error_file,
-     mmap_array_error_out_of_bounds,
-     mmap_array_error_advise
-       
-} MMapError;
+     mmap_array_error_ok = 0,         /**< No error */
+     mmap_array_error_memory,         /**< Error allocation memory */
+     mmap_array_error_internal,       /**< Unexpected error */
+     mmap_array_error_mmap,           /**< Error with a mmap operation (creation, unmapping, advise...) */
+     mmap_array_error_file,           /**< Error manipulating the file system */
+     mmap_array_error_out_of_bounds   /**< Tried to access array past boundaries */
 
+} MMapArrayError;
+
+/** A memory mapped array */
 typedef struct {
-     char *mem;
-     int fd;
-     size_t n_elements;
-     size_t element_size;
+     char *mem;            /**< Pointer to data */
+     int fd;               /**< File descriptor for data */
+     size_t n_elements;    /**< Number of elements */
+     size_t element_size;  /**< Size of each element */
 
-     MMapError error;
+     MMapArrayError error; /**< Last error */
+     /** A message with a meaningful description of the error */
      char error_msg[MMAP_ARRAY_MAX_ERROR_LENGTH+1];
-
-     int exit_on_error;
 } MMapArray;
 
-MMapArray*
-mmap_array_new_from_fd(int fd, size_t n_elements, size_t element_size);
+/** Create a new MMapArray
+ *
+ * @param marr Will be changed to point to the newly allocated structure, or NULL if failure
+ * @param path Path to the associated file. Can be NULL in which case the mapping is made anonymous.
+ * @param n_elements Number of elements (can be changed later with @ref mmap_array_resize)
+ * @param element_size Number of bytes of each element
+ *
+ * @return 0 if success, otherwise the error code (also available in @ref marr if not NULL)
+ */
+MMapArrayError
+mmap_array_new(MMapArray **marr,
+	       const char *path,
+	       size_t n_elements,
+	       size_t element_size);
 
-MMapArray*
-mmap_array_new_from_path(const char *path, size_t n_element, size_t element_size);
-
-int
+/** Delete MMapArray
+ *
+ * If the structure cannot be deleted, the memory will not be freed
+ *
+ * @return 0 if success, otherwise the error code (also available in @ref marr)
+ */
+MMapArrayError
 mmap_array_delete(MMapArray *marr);
 
-void
-mmap_array_exit_on_error(MMapArray *marr);
-
-int
+/** Advise memory use pattern
+ *
+ *  It accepts any flag that madvise accepts
+ *
+ * @return 0 if success, otherwise the error code (also available in @ref marr)
+ */
+MMapArrayError
 mmap_array_advise(MMapArray *marr, int flag);
 
-int
+/** Force memory-disk syncronization
+ *
+ * It accepts any flag that msync accepts
+ *
+ * @return 0 if success, otherwise the error code (also available in @ref marr)
+ */
+MMapArrayError
 mmap_array_sync(MMapArray *marr, int flag);
 
+/** Returns pointer to the array element
+ *
+ * @return In case of failure it will return NULL. The error code is available in @ref marr
+ */
 void *
 mmap_array_idx(MMapArray *marr, size_t n);
 
-int
+/** Set array element value
+ *
+ * @return 0 if success, otherwise the error code (also available in @ref marr)
+ */
+MMapArrayError
 mmap_array_set(MMapArray *marr, size_t n, const void *x);
 
-int
+/** Change number of elements
+ *
+ * The new memort is initialized to 0
+ *
+ * @return 0 if success, otherwise the error code (also available in @ref marr)
+ */
+MMapArrayError
 mmap_array_resize(MMapArray *marr, size_t n_elements);
 
 #endif // _MMAP_ARRAY
