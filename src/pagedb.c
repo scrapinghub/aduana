@@ -81,7 +81,7 @@ page_info_new_link(const char *link) {
 	  free(pi);
 	  return 0;
      }
-     strcpy(pi->url, link);     
+     strcpy(pi->url, link);
      return pi;
 }
 
@@ -258,7 +258,7 @@ bfs_get(MDB_cursor *cur, MDB_val *hash) {
      return
 	  mdb_cursor_get(cur, &key, hash, MDB_FIRST) ||
 	  mdb_cursor_del(cur, 0);
-     
+
 }
 
 static void
@@ -341,7 +341,7 @@ page_db_new(PageDB **db, const char *path) {
 	  error = "setting map size";
      else if ((mdb_rc = mdb_env_set_maxdbs(p->env, 5)) != 0)
 	  error = "setting number of databases";
-     else if ((mdb_rc = mdb_env_open(p->env, path, 0, 0664) != 0))
+     else if ((mdb_rc = mdb_env_open(p->env, path, MDB_WRITEMAP | MDB_MAPASYNC, 0664) != 0))
 	  error = "opening environment";
      else if ((mdb_rc = mdb_txn_begin(p->env, 0, 0, &txn)) != 0)
 	  error = "starting transaction";
@@ -424,9 +424,9 @@ page_db_new(PageDB **db, const char *path) {
  * @return 0 if success, -1 if failure.
  */
 static int
-page_db_add_crawled_page_info(MDB_cursor *cur, 
-			      MDB_val *key, 
-			      const CrawledPage *page, 
+page_db_add_crawled_page_info(MDB_cursor *cur,
+			      MDB_val *key,
+			      const CrawledPage *page,
 			      PageInfo **page_info,
 			      int *mdb_error) {
      MDB_val val;
@@ -475,9 +475,9 @@ on_error:
  * @return 0 if success, -1 if failure.
  */
 static int
-page_db_add_link_page_info(MDB_cursor *cur, 
-			   MDB_val *key, 
-			   char *url, 
+page_db_add_link_page_info(MDB_cursor *cur,
+			   MDB_val *key,
+			   char *url,
 			   PageInfo **page_info,
 			   int *mdb_error) {
      MDB_val val;
@@ -505,15 +505,15 @@ static int
 mdb_cmp_float(const MDB_val *a, const MDB_val *b) {
      float x = *(float*)(a->mv_data);
      float y = *(float*)(b->mv_data);
-     return x < y? -1: x > y? +1: 0;	       
+     return x < y? -1: x > y? +1: 0;
 }
 
 static int
-page_db_open_cursor(MDB_txn *txn, 
-		    const char *db_name, 
-		    int flags, 
+page_db_open_cursor(MDB_txn *txn,
+		    const char *db_name,
+		    int flags,
 		    MDB_cursor **cursor,
-		    MDB_cmp_func *func) {     
+		    MDB_cmp_func *func) {
      MDB_dbi dbi;
      int mdb_rc =
 	  mdb_dbi_open(txn, db_name, flags, &dbi) ||
@@ -569,6 +569,13 @@ page_db_add(PageDB *db, const CrawledPage *page) {
      char *error;
      int mdb_rc;
 
+     // we allow for the transaction to fail once. The reason is that if the
+     // database grows past the initial allocated space attempting to add
+     // more data will fail. Initially I tried to detect the MDB_MAP_FULL return
+     // code but LMDB uses the allocated space to maintain also a freeDB for
+     // its own purpose and the mdb_freelist_save gave an EPERMIT error when the
+     // database was filled.
+     int failed = 0;
 txn_start: // return here if the transaction is discarded and must be repeated
      error = 0;
      // start a new write transaction
@@ -609,7 +616,7 @@ txn_start: // return here if the transaction is discarded and must be repeated
      }
      if (pi != 0 && (mdb_rc = db->sched_add(cur_schedule, &key, pi) != 0)) {
 	  error = "scheduling page";
-	  goto on_error;	  
+	  goto on_error;
      }
      page_info_delete(pi);
 
@@ -642,7 +649,7 @@ txn_start: // return here if the transaction is discarded and must be repeated
 		    }
 		    if (pi != 0 && (mdb_rc = db->sched_add(cur_schedule, &key, pi) != 0)) {
 			 error = "scheduling page";
-			 goto on_error;	  
+			 goto on_error;
 		    }
 		    page_info_delete(pi);
 	       }
@@ -667,24 +674,23 @@ txn_start: // return here if the transaction is discarded and must be repeated
      key.mv_data = id;
      val.mv_size = sizeof(uint64_t)*page->n_links;
      val.mv_data = id + 1;
-     mdb_rc =
-	  mdb_cursor_put(cur_links, &key, &val, 0) ||
-	  mdb_txn_commit(txn);
-     if (mdb_rc != 0)
+     if ((mdb_rc = mdb_cursor_put(cur_links, &key, &val, 0)) != 0) {
+	  error = "storing links";
 	  goto on_error;
-
+     }
+     if ((mdb_rc = mdb_txn_commit(txn) != 0)) {
+	  error = "commiting transaction";
+	  goto on_error;
+     }
 
      return db->error;
 on_error:
-     switch (mdb_rc) {
-     case MDB_MAP_FULL:
-	  // close transactions, resize, and try again
+     if (!failed) { // allow one failure
 	  mdb_txn_abort(txn);
 	  page_db_grow(db);
+	  failed = 1;
 	  goto txn_start;
-
-     case MDB_TXN_FULL: // TODO unlikely. Treat as error.
-     default:
+     } else {
 	  page_db_set_error(db, page_db_error_internal, __func__);
 	  if (error != 0)
 	       page_db_add_error(db, error);
@@ -767,7 +773,7 @@ page_db_request(PageDB *db, size_t n_pages, PageInfo **pi) {
 	  goto on_error;
      }
      else {
-	  MDB_val hash;	  
+	  MDB_val hash;
 	  MDB_val val;
 	  for (size_t i=0; i<n_pages; ++i)
 	       switch (mdb_rc = db->sched_get(cur_schedule, &hash)) {
@@ -967,10 +973,10 @@ test_page_info_serialization(CuTest *tc) {
      };
 
      CuAssertTrue(tc, page_info_dump(&pi1, &val) == 0);
-     
+
      PageInfo *pi2 = page_info_load(&val);
      CuAssertPtrNotNull(tc, pi2);
-     
+
      CuAssertStrEquals(tc, pi1.url, pi2->url);
      CuAssertTrue(tc, pi1.first_crawl == pi2->first_crawl);
      CuAssertTrue(tc, pi1.last_crawl == pi2->last_crawl);
@@ -989,15 +995,12 @@ test_page_db_simple(CuTest *tc) {
      mkdtemp(test_dir);
      char data[] = "test-pagedb-XXXXXX/data.mdb";
      char lock[] = "test-pagedb-XXXXXX/lock.mdb";
-     for (size_t i=0; 
-	  test_dir[i] != 0; 
-	  i++) {
+     for (size_t i=0; test_dir[i] != 0; i++)
 	  data[i] = lock[i] = test_dir[i];
-     }
 
      PageDB *db;
-     CuAssert(tc, 
-	      db!=0? db->error_msg: "NULL", 
+     CuAssert(tc,
+	      db!=0? db->error_msg: "NULL",
 	      page_db_new(&db, test_dir) == 0);
 
      char *cp1_links[] = {"a", "b", "www.google.com"};
@@ -1021,19 +1024,19 @@ test_page_db_simple(CuTest *tc) {
 	  .content_hash_length = 0
      };
 
-     CuAssert(tc, 
-	      db->error_msg, 
+     CuAssert(tc,
+	      db->error_msg,
 	      page_db_add(db, &cp1) == 0);
-     CuAssert(tc, 
-	      db->error_msg, 
+     CuAssert(tc,
+	      db->error_msg,
 	      page_db_add(db, &cp2) == 0);
 
      char pi_out[1000];
      char *print_pages[] = {"cp2", "www.google.com", "cp1"};
      for (size_t i=0; i<3; ++i) {
 	  PageInfo *pi;
-	  CuAssert(tc, 
-		   db->error_msg, 
+	  CuAssert(tc,
+		   db->error_msg,
 		   page_db_get_info(db, print_pages[i], &pi) == 0);
 
 	  CuAssertPtrNotNull(tc, pi);
@@ -1044,8 +1047,8 @@ test_page_db_simple(CuTest *tc) {
      }
 
      PageDBLinkStream *es;
-     CuAssert(tc, 
-	      db->error_msg, 
+     CuAssert(tc,
+	      db->error_msg,
 	      page_db_link_stream_new(&es, db) == 0);
 
      if (es->state == link_stream_state_init) {
@@ -1058,7 +1061,55 @@ test_page_db_simple(CuTest *tc) {
      page_db_link_stream_delete(es);
 
      page_db_delete(db);
-     
+
+     remove(data);
+     remove(lock);
+     remove(test_dir);
+}
+
+void
+test_page_db_large(CuTest *tc) {
+     char test_dir[] = "test-pagedb-XXXXXX";
+     mkdtemp(test_dir);
+     char data[] = "test-pagedb-XXXXXX/data.mdb";
+     char lock[] = "test-pagedb-XXXXXX/lock.mdb";
+     for (size_t i=0; test_dir[i] != 0;  i++)
+	  data[i] = lock[i] = test_dir[i];
+
+     PageDB *db;
+     CuAssert(tc,
+	      db!=0? db->error_msg: "NULL",
+	      page_db_new(&db, test_dir) == 0);
+
+     const int n_links = 10;
+     const int n_pages = 10000000;
+
+     char *urls[n_links + 1];
+     for (int j=0; j<=n_links; ++j)
+	  sprintf(urls[j] = malloc(50), "test_url_%d", j);
+
+     for (int i=0; i<n_pages; ++i) {
+	  for (int j=0; j<n_links; ++j)
+	       urls[j] = urls[j+1];
+	  sprintf(urls[n_links], "test_url_%d", i + n_links);
+	  if (i % 100000 == 0)
+	       printf("% 12d\n", i);
+	  CrawledPage cp = {
+	       .url                 = urls[0],
+	       .links               = urls + 1,
+	       .n_links             = n_links,
+	       .time                = i,
+	       .score               = 0.5,
+	       .content_hash        = 0,
+	       .content_hash_length = 0
+	  };
+
+	  CuAssert(tc,
+		   db->error_msg,
+		   page_db_add(db, &cp) == 0);
+     }
+     page_db_delete(db);
+
      remove(data);
      remove(lock);
      remove(test_dir);
@@ -1067,8 +1118,9 @@ test_page_db_simple(CuTest *tc) {
 CuSuite *
 test_page_db_suite(void) {
      CuSuite *suite = CuSuiteNew();
-     SUITE_ADD_TEST(suite, test_page_db_simple);
      SUITE_ADD_TEST(suite, test_page_info_serialization);
+     SUITE_ADD_TEST(suite, test_page_db_simple);
+     SUITE_ADD_TEST(suite, test_page_db_large);
 
      return suite;
 }
