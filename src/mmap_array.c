@@ -59,11 +59,13 @@ mmap_array_new(MMapArray **marr,
      if (!p)
 	  return mmap_array_error_memory;
 
+     // resizing works by doubling current size
+     if (n_elements == 0)
+	  n_elements = 1;
+
      p->n_elements = n_elements;
      p->element_size = element_size;
-
-     p->error = mmap_array_error_ok;
-     p->error_msg[0] = '\0';
+     mmap_array_set_error(p, mmap_array_error_ok, "NO ERROR");
 
      char *error = 0;
      int errno_cp = 0;

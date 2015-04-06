@@ -46,6 +46,7 @@ hits_new(Hits **hits, const char *path, size_t max_vertices) {
      if (!p) 
 	  return hits_error_memory;
      p->n_pages = 0;
+     hits_set_error(p, hits_error_ok, "NO ERROR");
 
      char *error1 = 0;
      char *error2 = 0;
