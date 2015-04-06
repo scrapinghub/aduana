@@ -14,6 +14,8 @@
 #include "xxhash.h"
 
 #include "pagedb.h"
+#include "hits.h"
+#include "page_rank.h"
 
 char *
 build_path(const char *path, const char *fname) {
@@ -305,7 +307,7 @@ page_db_new(PageDB **db, const char *path) {
      PageDB *p = *db = malloc(sizeof(*p));
      if (p == 0)
 	  return page_db_error_memory;
-     p->error = page_db_error_ok;
+     page_db_set_error(p, page_db_error_ok, "NO ERROR");
      p->error_msg[0] = '\0';
      p->sched_add = bfs_add;
      p->sched_get = bfs_get;
@@ -341,7 +343,10 @@ page_db_new(PageDB **db, const char *path) {
 	  error = "setting map size";
      else if ((mdb_rc = mdb_env_set_maxdbs(p->env, 5)) != 0)
 	  error = "setting number of databases";
-     else if ((mdb_rc = mdb_env_open(p->env, path, MDB_WRITEMAP | MDB_MAPASYNC, 0664) != 0))
+     else if ((mdb_rc = mdb_env_open(
+		    p->env,
+		    path,
+		    MDB_NOTLS | MDB_WRITEMAP | MDB_MAPASYNC, 0664) != 0))
 	  error = "opening environment";
      else if ((mdb_rc = mdb_txn_begin(p->env, 0, 0, &txn)) != 0)
 	  error = "starting transaction";
@@ -744,6 +749,55 @@ page_db_get_info(PageDB *db, const char *url, PageInfo **pi) {
      return 0;
 
 on_error:
+     mdb_txn_abort(txn);
+     page_db_set_error(db, page_db_error_internal, __func__);
+     if (error != 0)
+	  page_db_add_error(db, error);
+     if (mdb_rc != 0)
+	  page_db_add_error(db, mdb_strerror(mdb_rc));
+
+     return db->error;
+}
+
+PageDBError
+page_db_get_idx(PageDB *db, const char *url, uint64_t *idx) {
+     MDB_txn *txn = 0;
+     MDB_cursor *cur = 0;
+
+     int mdb_rc;
+     char *error = 0;
+     if ((mdb_rc = mdb_txn_begin(db->env, 0, MDB_RDONLY, &txn)) != 0) {
+	  error = "opening transaction";
+	  goto on_error;
+     // open hash2info database
+     } else if ((mdb_rc = page_db_open_hash2idx(txn, &cur)) != 0) {
+	  error = "opening hash2idx database";
+	  goto on_error;
+     }
+     else {
+	  uint64_t hash = XXH64(url, strlen(url), 0);
+	  MDB_val key = {
+	       .mv_size = sizeof(uint64_t),
+	       .mv_data = &hash
+	  };
+	  MDB_val val;
+	  switch (mdb_rc = mdb_cursor_get(cur, &key, &val, MDB_SET)) {
+	  case 0:
+	       *idx = *(uint64_t*)val.mv_data;
+	       return 0;
+	  case MDB_NOTFOUND:
+	       *idx = 0;
+	       return page_db_error_no_page;
+	  default:
+	       error = "retrieving val from hash2info";
+	       goto on_error;
+	       break;
+	  }
+     }
+
+on_error:
+     if (txn != 0)
+	  mdb_txn_abort(txn);
      page_db_set_error(db, page_db_error_internal, __func__);
      if (error != 0)
 	  page_db_add_error(db, error);
@@ -924,7 +978,7 @@ page_db_link_stream_reset(PageDBLinkStream *es) {
 
 LinkStreamState
 page_db_link_stream_next(PageDBLinkStream *es, Link *link) {
-     if (es->i_to == es->n_to) {
+     while (es->i_to >= es->n_to) { // skip pages without links
 	  int mdb_rc;
 	  MDB_val key;
 	  MDB_val val;
@@ -958,6 +1012,7 @@ page_db_link_stream_delete(PageDBLinkStream *es) {
 #if TEST
 #include "CuTest.h"
 
+/* Tests the loading/dumping of PageInfo from and into LMDB values */
 void
 test_page_info_serialization(CuTest *tc) {
      MDB_val val;
@@ -989,6 +1044,7 @@ test_page_info_serialization(CuTest *tc) {
      page_info_delete(pi2);
 }
 
+/* Tests all the database operations on a very simple crawl of just two pages */
 void
 test_page_db_simple(CuTest *tc) {
      char test_dir[] = "test-pagedb-XXXXXX";
@@ -1003,25 +1059,27 @@ test_page_db_simple(CuTest *tc) {
 	      db!=0? db->error_msg: "NULL",
 	      page_db_new(&db, test_dir) == 0);
 
+     uint64_t hash1 = 1000;
+     uint64_t hash2 = 2000;
      char *cp1_links[] = {"a", "b", "www.google.com"};
      CrawledPage cp1 = {
-	  .url                 = "cp1",
+	  .url                 = "www.yahoo.com",
 	  .links               = cp1_links,
 	  .n_links             = 3,
 	  .time                = time(0),
 	  .score               = 0.5,
-	  .content_hash        = 0,
-	  .content_hash_length = 0
+	  .content_hash        = (char*)&hash1,
+	  .content_hash_length = sizeof(hash1)
      };
      char *cp2_links[] = {"x", "y"};
      CrawledPage cp2 = {
-	  .url                 = "cp2",
+	  .url                 = "www.bing.com",
 	  .links               = cp2_links,
 	  .n_links             = 2,
 	  .time                = time(0),
 	  .score               = 0.2,
-	  .content_hash        = 0,
-	  .content_hash_length = 0
+	  .content_hash        = (char*)&hash2,
+	  .content_hash_length = sizeof(hash2)
      };
 
      CuAssert(tc,
@@ -1031,8 +1089,14 @@ test_page_db_simple(CuTest *tc) {
 	      db->error_msg,
 	      page_db_add(db, &cp2) == 0);
 
+     cp2.time = time(0);
+     hash2 = 3000;
+     CuAssert(tc,
+	      db->error_msg,
+	      page_db_add(db, &cp2) == 0);
+
      char pi_out[1000];
-     char *print_pages[] = {"cp2", "www.google.com", "cp1"};
+     char *print_pages[] = {"www.yahoo.com", "www.google.com", "www.bing.com"};
      for (size_t i=0; i<3; ++i) {
 	  PageInfo *pi;
 	  CuAssert(tc,
@@ -1041,9 +1105,30 @@ test_page_db_simple(CuTest *tc) {
 
 	  CuAssertPtrNotNull(tc, pi);
 
+	  switch(i) {
+	  case 0:
+	       CuAssertIntEquals(tc, 1, pi->n_crawls);
+	       CuAssertIntEquals(tc, 0, pi->n_changes);
+	       break;
+	  case 1:
+	       CuAssertIntEquals(tc, 0, pi->n_crawls);
+	       break;
+	  case 2:
+	       CuAssertIntEquals(tc, 2, pi->n_crawls);
+	       CuAssertIntEquals(tc, 1, pi->n_changes);
+	       break;
+	  }
 	  page_info_print(pi, pi_out);
 	  page_info_delete(pi);
+/* show on screen the page info:
+ *
+ * Mon Apr  6 15:34:50 2015|Mon Apr  6 15:34:50 2015|1.00e+00|0.00e+00|www.yahoo.com
+ * Thu Jan  1 01:00:00 1970|Thu Jan  1 01:00:00 1970|0.00e+00|0.00e+00|www.google.com
+ * Mon Apr  6 15:34:50 2015|Mon Apr  6 15:34:50 2015|2.00e+00|1.00e+00|www.bing.com
+ */
+#if 0
 	  printf("%s\n", pi_out);
+#endif
      }
 
      PageDBLinkStream *es;
@@ -1053,8 +1138,33 @@ test_page_db_simple(CuTest *tc) {
 
      if (es->state == link_stream_state_init) {
 	  Link link;
+	  int i=0;
 	  while (page_db_link_stream_next(es, &link) == link_stream_state_next) {
-	       printf("%zu %zu\n", link.from, link.to);
+	       switch(i++) {
+	       case 0:
+		    CuAssertIntEquals(tc, 0, link.from);
+		    CuAssertIntEquals(tc, 1, link.to);
+		    break;
+	       case 1:
+		    CuAssertIntEquals(tc, 0, link.from);
+		    CuAssertIntEquals(tc, 2, link.to);
+		    break;
+	       case 2:
+		    CuAssertIntEquals(tc, 0, link.from);
+		    CuAssertIntEquals(tc, 3, link.to);
+		    break;
+	       case 3:
+		    CuAssertIntEquals(tc, 4, link.from);
+		    CuAssertIntEquals(tc, 5, link.to);
+		    break;
+	       case 4:
+		    CuAssertIntEquals(tc, 4, link.from);
+		    CuAssertIntEquals(tc, 6, link.to);
+		    break;
+	       default:
+		    CuFail(tc, "too many links");
+		    break;
+	       }
 	  }
 	  CuAssertTrue(tc, es->state != link_stream_state_error);
      }
@@ -1067,14 +1177,17 @@ test_page_db_simple(CuTest *tc) {
      remove(test_dir);
 }
 
+/* Tests the typical database operations on a moderate crawl of 10M pages */
 void
 test_page_db_large(CuTest *tc) {
      char test_dir[] = "test-pagedb-XXXXXX";
      mkdtemp(test_dir);
      char data[] = "test-pagedb-XXXXXX/data.mdb";
      char lock[] = "test-pagedb-XXXXXX/lock.mdb";
+     char h1[] = "test-pagedb-XXXXXX/hits_h1.bin";
+     char h2[] = "test-pagedb-XXXXXX/hits_h2.bin";
      for (size_t i=0; test_dir[i] != 0;  i++)
-	  data[i] = lock[i] = test_dir[i];
+	  data[i] = lock[i] = h1[i] = h2[i] = test_dir[i];
 
      PageDB *db;
      CuAssert(tc,
@@ -1092,8 +1205,10 @@ test_page_db_large(CuTest *tc) {
 	  for (int j=0; j<n_links; ++j)
 	       urls[j] = urls[j+1];
 	  sprintf(urls[n_links], "test_url_%d", i + n_links);
+#if 0
 	  if (i % 100000 == 0)
 	       printf("% 12d\n", i);
+#endif
 	  CrawledPage cp = {
 	       .url                 = urls[0],
 	       .links               = urls + 1,
@@ -1108,8 +1223,287 @@ test_page_db_large(CuTest *tc) {
 		   db->error_msg,
 		   page_db_add(db, &cp) == 0);
      }
-     page_db_delete(db);
 
+     PageDBLinkStream *st;
+     CuAssert(tc,
+	      db->error_msg,
+	      page_db_link_stream_new(&st, db) == 0);
+
+     Hits *hits;
+     CuAssert(tc,
+	      hits!=0? hits->error_msg: "NULL",
+	      hits_new(&hits, test_dir, n_pages) == 0);
+
+     CuAssert(tc,
+	      hits->error_msg,
+	      hits_compute(hits,
+			   st,
+			   page_db_link_stream_next,
+			   page_db_link_stream_reset) == 0);
+
+     CuAssert(tc,
+	      hits->error_msg,
+	      hits_delete(hits) == 0);
+
+     page_db_link_stream_delete(st);
+     remove(h1);
+     remove(h2);
+
+     page_db_delete(db);
+     remove(data);
+     remove(lock);
+     remove(test_dir);
+}
+
+/* Checks the accuracy of the HITS computation */
+void
+test_page_db_hits(CuTest *tc) {
+     /* Compute the HITS score of the following graph
+      *        +-->2---+
+      *        |   |   |
+      *        |   v   v
+      *        1-->5<--3
+      *        ^   ^   |
+      *        |   |   |
+      *        +---4<--+
+      *
+      * The link matrix L[i,j], where L[i,j] = 1 means 'i' links to 'j' is:
+      *
+      *        +-         -+
+      *        | 0 1 0 0 1 |
+      *        | 0 0 1 0 1 |
+      *    L = | 0 0 0 1 1 |
+      *        | 1 0 0 0 1 |
+      *        | 0 0 0 0 0 |
+      *        +-         -+
+      */
+     char test_dir[] = "test-pagedb-XXXXXX";
+     mkdtemp(test_dir);
+     char data[] = "test-pagedb-XXXXXX/data.mdb";
+     char lock[] = "test-pagedb-XXXXXX/lock.mdb";
+     char h1[] = "test-pagedb-XXXXXX/hits_h1.bin";
+     char h2[] = "test-pagedb-XXXXXX/hits_h2.bin";
+     for (size_t i=0; test_dir[i] != 0;  i++)
+	  data[i] = lock[i] = h1[i] = h2[i] = test_dir[i];
+
+     PageDB *db;
+     CuAssert(tc,
+	      db!=0? db->error_msg: "NULL",
+	      page_db_new(&db, test_dir) == 0);
+
+     char *urls[5] = {"1", "2", "3", "4", "5" };
+     char *links_1[] = {"2", "5"};
+     char *links_2[] = {"3", "5"};
+     char *links_3[] = {"4", "5"};
+     char *links_4[] = {"1", "5"};
+     char **links[5] = {
+	  links_1, links_2, links_3, links_4, 0
+     };
+     int n_links[5] = {2, 2, 2, 2, 0};
+
+     CrawledPage cp;
+     for (int i=0; i<5; ++i) {
+	  cp.url = urls[i];
+	  cp.links = links[i];
+	  cp.n_links = n_links[i];
+	  cp.time = i;
+	  cp.score = ((float)i)/5.0;
+	  cp.content_hash = (char*)&i;
+	  cp.content_hash_length = sizeof(i);
+
+	  CuAssert(tc,
+		   db->error_msg,
+		   page_db_add(db, &cp) == 0);
+     }
+
+     PageDBLinkStream *st;
+     CuAssert(tc,
+	      db->error_msg,
+	      page_db_link_stream_new(&st, db) == 0);
+
+     Hits *hits;
+     CuAssert(tc,
+	      hits!=0? hits->error_msg: "NULL",
+	      hits_new(&hits, test_dir, 5) == 0);
+
+     CuAssert(tc,
+	      hits->error_msg,
+	      hits_compute(hits,
+			   st,
+			   page_db_link_stream_next,
+			   page_db_link_stream_reset) == 0);
+     page_db_link_stream_delete(st);
+
+     uint64_t idx;
+     float *h_score;
+     float *a_score;
+     float h_scores[5] = {0.250, 0.250, 0.250, 0.250, 0.000};
+     float a_scores[5] = {0.125, 0.125, 0.125, 0.125, 0.500};
+
+     for (int i=0; i<5; ++i) {
+	  CuAssert(tc,
+		   db->error_msg,
+		   page_db_get_idx(db, urls[i], &idx) == 0);
+
+	  CuAssertPtrNotNull(tc,
+			     h_score = mmap_array_idx(hits->h1, idx));
+	  CuAssertPtrNotNull(tc,
+			     a_score = mmap_array_idx(hits->a1, idx));
+
+	  CuAssertDblEquals(tc, h_scores[i], *h_score, 1e-6);
+	  CuAssertDblEquals(tc, a_scores[i], *a_score, 1e-6);
+     }
+     CuAssert(tc,
+	      hits->error_msg,
+	      hits_delete(hits) == 0);
+     remove(h1);
+     remove(h2);
+
+     page_db_delete(db);
+     remove(data);
+     remove(lock);
+     remove(test_dir);
+}
+
+/* Checks the accuracy of the PageRank computation */
+void
+test_page_db_page_rank(CuTest *tc) {
+     /* Compute the PageRank score of the following graph
+      *        +-->2---+
+      *        |   |   |
+      *        |   v   v
+      *        1-->5<--3
+      *        ^   ^   |
+      *        |   |   |
+      *        +---4<--+
+      *
+      * The link matrix L[i,j], where L[i,j] = 1 means 'i' links to 'j' is:
+      *
+      *        +-         -+
+      *        | 0 1 0 0 1 |
+      *        | 0 0 1 0 1 |
+      *    L = | 0 0 0 1 1 |
+      *        | 1 0 0 0 1 |
+      *        | 0 0 0 0 0 |
+      *        +-         -+
+      *
+      * Since page "5" has no outbound links, it is assumed it links to every other page:
+      *
+      *        +-         -+
+      *        | 0 1 0 0 1 |
+      *        | 0 0 1 0 1 |
+      *    L = | 0 0 0 1 1 |
+      *        | 1 0 0 0 1 |
+      *        | 1 1 1 1 1 |
+      *        +-         -+
+      *
+      * The out degree is:
+      *
+      *    deg = {2, 2, 2, 2, 5}
+      *
+      * Dividing each row with the out degree and transposing we get the matrix:
+      *
+      *    M[i, j] = L[j, i]/deg[j]
+      *
+      * we get:
+      *
+      *        +-                   -+
+      *        | 0   0   0   0.5 0.2 |
+      *        | 0.5 0   0   0   0.2 |
+      *    M = | 0   0.5 0   0   0.2 |
+      *        | 0   0   0.5 0   0.2 |
+      *        | 0.5 0.5 0.5 0.5 0.2 |
+      *        +-                   -+
+      *
+      * If 'd' is the damping then the PageRank 'PR' is:
+      *
+      *        1 - d
+      *   PR = ----- + (d * M)*PR
+      *          N
+      *
+      * For d=0.85 the numerical solution is:
+      *
+      *   PR(1) = PR(2) = PR(3) = PR(4) = 0.15936255
+      *   PR(5) = 0.3625498
+      */
+     char test_dir[] = "test-pagedb-XXXXXX";
+     mkdtemp(test_dir);
+     char data[] = "test-pagedb-XXXXXX/data.mdb";
+     char lock[] = "test-pagedb-XXXXXX/lock.mdb";
+     char out_degree[] = "test-pagedb-XXXXXX/pr_out_degree.bin";
+     char pr_val[] = "test-pagedb-XXXXXX/pr.bin";
+     for (size_t i=0; test_dir[i] != 0;  i++)
+	  data[i] = lock[i] = out_degree[i] = pr_val[i] = test_dir[i];
+
+     PageDB *db;
+     CuAssert(tc,
+	      db!=0? db->error_msg: "NULL",
+	      page_db_new(&db, test_dir) == 0);
+
+     char *urls[5] = {"1", "2", "3", "4", "5" };
+     char *links_1[] = {"2", "5"};
+     char *links_2[] = {"3", "5"};
+     char *links_3[] = {"4", "5"};
+     char *links_4[] = {"1", "5"};
+     char **links[5] = {
+	  links_1, links_2, links_3, links_4, 0
+     };
+     int n_links[5] = {2, 2, 2, 2, 0};
+
+     CrawledPage cp;
+     for (int i=0; i<5; ++i) {
+	  cp.url = urls[i];
+	  cp.links = links[i];
+	  cp.n_links = n_links[i];
+	  cp.time = i;
+	  cp.score = ((float)i)/5.0;
+	  cp.content_hash = (char*)&i;
+	  cp.content_hash_length = sizeof(i);
+
+	  CuAssert(tc,
+		   db->error_msg,
+		   page_db_add(db, &cp) == 0);
+     }
+
+     PageDBLinkStream *st;
+     CuAssert(tc,
+	      db->error_msg,
+	      page_db_link_stream_new(&st, db) == 0);
+
+     PageRank *pr;
+     CuAssert(tc,
+	      pr!=0? pr->error_msg: "NULL",
+	      page_rank_new(&pr, test_dir, 5, 0.85) == 0);
+
+     CuAssert(tc,
+	      pr->error_msg,
+	      page_rank_compute(pr,
+				st,
+				page_db_link_stream_next,
+				page_db_link_stream_reset) == 0);
+     page_db_link_stream_delete(st);
+
+     uint64_t idx;
+     float *score;
+
+     float scores[5] =  {0.15936255,  0.15936255,  0.15936255,  0.15936255,  0.3625498};
+     for (int i=0; i<5; ++i) {
+	  CuAssert(tc,
+		   db->error_msg,
+		   page_db_get_idx(db, urls[i], &idx) == 0);
+
+	  CuAssertPtrNotNull(tc,
+			     score = mmap_array_idx(pr->value1, idx));
+
+	  CuAssertDblEquals(tc, scores[i], *score, 1e-6);
+     }
+     CuAssert(tc,
+	      pr->error_msg,
+	      page_rank_delete(pr) == 0);
+     remove(out_degree);
+     remove(pr_val);
+
+     page_db_delete(db);
      remove(data);
      remove(lock);
      remove(test_dir);
@@ -1120,6 +1514,8 @@ test_page_db_suite(void) {
      CuSuite *suite = CuSuiteNew();
      SUITE_ADD_TEST(suite, test_page_info_serialization);
      SUITE_ADD_TEST(suite, test_page_db_simple);
+     SUITE_ADD_TEST(suite, test_page_db_hits);
+     SUITE_ADD_TEST(suite, test_page_db_page_rank);
      SUITE_ADD_TEST(suite, test_page_db_large);
 
      return suite;

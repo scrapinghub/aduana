@@ -86,7 +86,8 @@ typedef enum {
      page_db_error_ok = 0,       /**< No error */
      page_db_error_memory,       /**< Error allocating memory */
      page_db_error_invalid_path, /**< File system error */
-     page_db_error_internal      /**< Unexpected error */
+     page_db_error_internal,     /**< Unexpected error */
+     page_db_error_no_page       /**< A page was requested but could not be found */
 } PageDBError;
 
 /** Function to call when a PageInfo is modified */
@@ -172,6 +173,10 @@ page_db_add(PageDB *db, const CrawledPage *page);
  */
 PageDBError
 page_db_get_info(PageDB *db, const char *url, PageInfo **pi);
+
+/** Get index for the given URL */
+PageDBError
+page_db_get_idx(PageDB *db, const char *url, uint64_t *idx);
 
 /** Retrieve an array of the next pages that should be crawled, 
     according to the scheduler.
