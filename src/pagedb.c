@@ -239,28 +239,98 @@ page_info_delete(PageInfo *pi) {
  */
 static char info_n_pages[] = "n_pages";
 
+static int
+mdb_cmp_float(const MDB_val *a, const MDB_val *b) {
+     float x = *(float*)(a->mv_data);
+     float y = *(float*)(b->mv_data);
+     return x < y? -1: x > y? +1: 0;
+}
+
+static int
+page_db_open_cursor(MDB_txn *txn,
+		    const char *db_name,
+		    int flags,
+		    MDB_cursor **cursor,
+		    MDB_cmp_func *func) {
+     MDB_dbi dbi;
+     int mdb_rc =
+	  mdb_dbi_open(txn, db_name, flags, &dbi) ||
+	  (func && mdb_set_compare(txn, dbi, func)) ||
+	  mdb_cursor_open(txn, dbi, cursor);
+     if (mdb_rc != 0)
+	  *cursor = 0;
+     return mdb_rc;
+}
+
+static int
+page_db_open_hash2info(MDB_txn *txn, MDB_cursor **cursor) {
+     return page_db_open_cursor(
+	  txn, "hash2info", MDB_CREATE | MDB_INTEGERKEY, cursor, 0);
+}
+
+static int
+page_db_open_hash2idx(MDB_txn *txn, MDB_cursor **cursor) {
+     return page_db_open_cursor(
+	  txn, "hash2idx", MDB_CREATE | MDB_INTEGERKEY, cursor, 0);
+}
+
+static int
+page_db_open_links(MDB_txn *txn, MDB_cursor **cursor) {
+     return page_db_open_cursor(
+	  txn, "links", MDB_CREATE | MDB_INTEGERKEY, cursor, 0);
+}
+
+static int
+page_db_open_info(MDB_txn *txn, MDB_cursor **cursor) {
+     return page_db_open_cursor(txn, "info", 0, cursor, 0);
+}
+
+static int
+page_db_open_schedule(MDB_txn *txn, MDB_cursor **cursor) {
+     return page_db_open_cursor(
+	  txn, "schedule", MDB_CREATE | MDB_DUPSORT, cursor, mdb_cmp_float);
+}
+
 /** Best First Search scheduler: add new page */
 int
-bfs_add(MDB_cursor *cur, MDB_val *hash, PageInfo *pi) {
+bfs_add(MDB_txn *txn, MDB_val *hash, PageInfo *pi) {
      int mdb_rc = 0;
      if (pi->n_crawls == 0) {
 	  MDB_val key = {
 	       .mv_size = sizeof(pi->score),
 	       .mv_data = &pi->score
 	  };
-	  mdb_rc = mdb_cursor_put(cur, &key, hash, 0);
+	  MDB_cursor *cur;
+	  mdb_rc =
+	       page_db_open_schedule(txn, &cur) ||
+	       mdb_cursor_put(cur, &key, hash, 0);
      }
      return mdb_rc;
 }
 
 /** Best First Search scheduler: retrieve next page to crawl */
 int
-bfs_get(MDB_cursor *cur, MDB_val *hash) {
-     MDB_val key;
-     return
-	  mdb_cursor_get(cur, &key, hash, MDB_FIRST) ||
-	  mdb_cursor_del(cur, 0);
+bfs_get(MDB_txn *txn, MDB_val *hash) {
+     MDB_val key; // stores the score
+     MDB_val val; // stores the hash
+     MDB_cursor *cur;
 
+     int mdb_rc =
+	  page_db_open_schedule(txn, &cur) ||
+	  mdb_cursor_get(cur, &key, &val, MDB_FIRST);
+     if (mdb_rc != 0)
+	  return mdb_rc;
+
+     hash->mv_size = val.mv_size;
+     hash->mv_data = malloc(val.mv_size);
+     if (!hash->mv_data)
+	  return -1; // TODO
+     memcpy(hash->mv_data, val.mv_data, val.mv_size);
+
+     if ((mdb_rc = mdb_cursor_del(cur, 0)) != 0)
+	  return mdb_rc;
+
+     return mdb_rc;
 }
 
 static void
@@ -506,58 +576,6 @@ on_error:
      return -1;
 }
 
-static int
-mdb_cmp_float(const MDB_val *a, const MDB_val *b) {
-     float x = *(float*)(a->mv_data);
-     float y = *(float*)(b->mv_data);
-     return x < y? -1: x > y? +1: 0;
-}
-
-static int
-page_db_open_cursor(MDB_txn *txn,
-		    const char *db_name,
-		    int flags,
-		    MDB_cursor **cursor,
-		    MDB_cmp_func *func) {
-     MDB_dbi dbi;
-     int mdb_rc =
-	  mdb_dbi_open(txn, db_name, flags, &dbi) ||
-	  (func && mdb_set_compare(txn, dbi, func)) ||
-	  mdb_cursor_open(txn, dbi, cursor);
-     if (mdb_rc != 0)
-	  *cursor = 0;
-     return mdb_rc;
-}
-
-static int
-page_db_open_hash2info(MDB_txn *txn, MDB_cursor **cursor) {
-     return page_db_open_cursor(
-	  txn, "hash2info", MDB_CREATE | MDB_INTEGERKEY, cursor, 0);
-}
-
-static int
-page_db_open_hash2idx(MDB_txn *txn, MDB_cursor **cursor) {
-     return page_db_open_cursor(
-	  txn, "hash2idx", MDB_CREATE | MDB_INTEGERKEY, cursor, 0);
-}
-
-static int
-page_db_open_links(MDB_txn *txn, MDB_cursor **cursor) {
-     return page_db_open_cursor(
-	  txn, "links", MDB_CREATE | MDB_INTEGERKEY, cursor, 0);
-}
-
-static int
-page_db_open_info(MDB_txn *txn, MDB_cursor **cursor) {
-     return page_db_open_cursor(txn, "info", 0, cursor, 0);
-}
-
-static int
-page_db_open_schedule(MDB_txn *txn, MDB_cursor **cursor) {
-     return page_db_open_cursor(
-	  txn, "schedule", MDB_CREATE | MDB_DUPSORT, cursor, mdb_cmp_float);
-}
-
 PageDBError
 page_db_add(PageDB *db, const CrawledPage *page) {
      MDB_txn *txn;
@@ -566,7 +584,6 @@ page_db_add(PageDB *db, const CrawledPage *page) {
      MDB_cursor *cur_hash2idx;
      MDB_cursor *cur_links;
      MDB_cursor *cur_info;
-     MDB_cursor *cur_schedule;
 
      MDB_val key;
      MDB_val val;
@@ -594,8 +611,6 @@ txn_start: // return here if the transaction is discarded and must be repeated
 	  error = "opening links cursor";
      else if ((mdb_rc = page_db_open_info(txn, &cur_info)) != 0)
 	  error = "opening info cursor";
-     else if ((mdb_rc = page_db_open_schedule(txn, &cur_schedule)) != 0)
-	  error = "opening schedule cursor";
 
      if (error != 0)
 	  goto on_error;
@@ -619,7 +634,7 @@ txn_start: // return here if the transaction is discarded and must be repeated
 	  error = "adding/updating page info";
 	  goto on_error;
      }
-     if (pi != 0 && (mdb_rc = db->sched_add(cur_schedule, &key, pi) != 0)) {
+     if (pi != 0 && (mdb_rc = db->sched_add(txn, &key, pi) != 0)) {
 	  error = "scheduling page";
 	  goto on_error;
      }
@@ -652,7 +667,7 @@ txn_start: // return here if the transaction is discarded and must be repeated
 			 error = "adding/updating link info";
 			 goto on_error;
 		    }
-		    if (pi != 0 && (mdb_rc = db->sched_add(cur_schedule, &key, pi) != 0)) {
+		    if (pi != 0 && (mdb_rc = db->sched_add(txn, &key, pi) != 0)) {
 			 error = "scheduling page";
 			 goto on_error;
 		    }
@@ -811,10 +826,13 @@ PageDBError
 page_db_request(PageDB *db, size_t n_pages, PageInfo **pi) {
      MDB_txn *txn;
      MDB_cursor *cur_hash2info;
-     MDB_cursor *cur_schedule;
+     MDB_val hash = {0}; // page hash
+     MDB_val val;        // dumped PageInfo
 
      int mdb_rc;
      char *error = 0;
+     // getting pages from the schedule database may involve writing to the
+     // database, we open the transaction in write mode
      if ((mdb_rc = mdb_txn_begin(db->env, 0, 0, &txn)) != 0)
 	  error = "opening transaction";
      // open hash2info database
@@ -822,15 +840,9 @@ page_db_request(PageDB *db, size_t n_pages, PageInfo **pi) {
 	  error = "opening hash2info database";
 	  goto on_error;
      }
-     else if ((mdb_rc = page_db_open_schedule(txn, &cur_schedule)) != 0) {
-	  error = "opening schedule database";
-	  goto on_error;
-     }
      else {
-	  MDB_val hash;
-	  MDB_val val;
 	  for (size_t i=0; i<n_pages; ++i)
-	       switch (mdb_rc = db->sched_get(cur_schedule, &hash)) {
+	       switch (mdb_rc = db->sched_get(txn, &hash)) {
 	       case 0:
 		    switch (mdb_rc = mdb_cursor_get(cur_hash2info, &hash, &val, MDB_SET)) {
 		    case 0:
@@ -857,6 +869,7 @@ page_db_request(PageDB *db, size_t n_pages, PageInfo **pi) {
      }
 
 all_pages_retrieved:
+     free(hash.mv_data);
      if ((mdb_rc = mdb_txn_commit(txn)) != 0) {
 	  error = "commiting scheduler transaction";
 	  goto on_error;
@@ -864,6 +877,7 @@ all_pages_retrieved:
      return 0;
 
 on_error:
+     free(hash.mv_data);
      page_db_set_error(db, page_db_error_internal, __func__);
      if (error != 0)
 	  page_db_add_error(db, error);
@@ -955,7 +969,8 @@ mdb_error:
 }
 
 LinkStreamState
-page_db_link_stream_reset(PageDBLinkStream *es) {
+page_db_link_stream_reset(void *st) {
+     PageDBLinkStream *es = st;
      int mdb_rc;
      MDB_val key;
      MDB_val val;
@@ -977,7 +992,8 @@ page_db_link_stream_reset(PageDBLinkStream *es) {
 }
 
 LinkStreamState
-page_db_link_stream_next(PageDBLinkStream *es, Link *link) {
+page_db_link_stream_next(void *st, Link *link) {
+     PageDBLinkStream *es = st;
      while (es->i_to >= es->n_to) { // skip pages without links
 	  int mdb_rc;
 	  MDB_val key;
@@ -1509,6 +1525,96 @@ test_page_db_page_rank(CuTest *tc) {
      remove(test_dir);
 }
 
+void
+test_page_db_requests(CuTest *tc) {
+     char test_dir[] = "test-pagedb-XXXXXX";
+     mkdtemp(test_dir);
+     char data[] = "test-pagedb-XXXXXX/data.mdb";
+     char lock[] = "test-pagedb-XXXXXX/lock.mdb";
+
+     for (size_t i=0; test_dir[i] != 0;  i++)
+	  data[i] = lock[i] = test_dir[i];
+
+     PageDB *db;
+     CuAssert(tc,
+	      db!=0? db->error_msg: "NULL",
+	      page_db_new(&db, test_dir) == 0);
+
+     /* Make the following crawl
+      *
+      *  0.2    0.2    0.3    0.1     0.4
+      *   1 ---> 2 ---->4----->5------>8----->9
+      *   |             |      |       |
+      *   |      +------+   +--+--+    |
+      *   |      |          |     |    |
+      *   |      v          v     v    |
+      *   +----> 3          6     7<---+
+      *                          0.5
+      *
+      *  After crawling pages 1, 2, 4, 5, 8 and 7 we have the following queue:
+      *
+      *  page  score
+      *  ----  ----
+      *  9     0.4
+      *  3     0.2
+      *  6     0.1
+      *
+      */
+     char *urls[6] = {"1", "2", "4", "5", "8", "7" };
+     char ***links = calloc(6, sizeof(*links));
+     size_t n_links[6] = {2, 1, 2, 3, 2, 0};
+
+     links[0] = calloc(2, sizeof(**links)); // 1
+     links[0][0] = "2";
+     links[0][1] = "3";
+
+     links[1] = calloc(1, sizeof(**links)); // 2
+     links[1][0] = "4";
+
+     links[2] = calloc(2, sizeof(**links)); // 4
+     links[2][0] = "3";
+     links[2][1] = "5";
+
+     links[3] = calloc(3, sizeof(**links)); // 5
+     links[3][0] = "6";
+     links[3][1] = "7";
+     links[3][2] = "8";
+
+     links[4] = calloc(2, sizeof(**links)); // 8
+     links[4][0] = "7";
+     links[4][1] = "9";
+
+     links[5] = 0; // 7
+
+     CrawledPage cp;
+     for (int i=0; i<6; ++i) {
+	  cp.url = urls[i];
+	  cp.links = links[i];
+	  cp.n_links = n_links[i];
+	  cp.time = i;
+	  cp.score = ((float)i)/5.0;
+	  cp.content_hash = (char*)&i;
+	  cp.content_hash_length = sizeof(i);
+
+	  CuAssert(tc,
+		   db->error_msg,
+		   page_db_add(db, &cp) == 0);
+     }
+
+     PageInfo *pi[2];
+     CuAssert(tc,
+	      db->error_msg,
+	      page_db_request(db, 2, pi) == 0);
+     CuAssert(tc,
+	      db->error_msg,
+	      page_db_request(db, 2, pi) == 0);
+
+     page_db_delete(db);
+     remove(data);
+     remove(lock);
+     remove(test_dir);
+}
+
 CuSuite *
 test_page_db_suite(void) {
      CuSuite *suite = CuSuiteNew();
@@ -1516,6 +1622,7 @@ test_page_db_suite(void) {
      SUITE_ADD_TEST(suite, test_page_db_simple);
      SUITE_ADD_TEST(suite, test_page_db_hits);
      SUITE_ADD_TEST(suite, test_page_db_page_rank);
+     SUITE_ADD_TEST(suite, test_page_db_requests);
      SUITE_ADD_TEST(suite, test_page_db_large);
 
      return suite;

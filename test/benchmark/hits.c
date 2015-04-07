@@ -10,6 +10,11 @@
 
 int 
 main(int argc, char **argv) {
+     if (argc != 2) {
+	  printf("Usage: hits path_to_lz4_links\n");
+	  return -1;
+     }
+
      Hits *hits;
      if (hits_new(&hits, "./test_hits", 1000000) != 0) 
 	  return -1;

@@ -38,18 +38,18 @@ typedef struct {
 
 /** Create new stream.
  *
- * @return 0 if success, -1 if failure 
+ * @return 0 if success, -1 if failure
  */
 int
 lz4_link_stream_new(LZ4LinkStream **es, const char *fname);
 
 /** Get next link */
 LinkStreamState
-lz4_link_stream_next(LZ4LinkStream *es, Link *next);
+lz4_link_stream_next(void *st, Link *next);
 
 /** Reset stream to beginning */
 LinkStreamState
-lz4_link_stream_reset(LZ4LinkStream *es);
+lz4_link_stream_reset(void *st);
 
 /** Delete link stream. Close any open file and free all memory if succesfull.
  *

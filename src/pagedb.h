@@ -91,9 +91,9 @@ typedef enum {
 } PageDBError;
 
 /** Function to call when a PageInfo is modified */
-typedef int (SchedulerAddFunc)(MDB_cursor *cur, MDB_val *hash, PageInfo *pi);
+typedef int (SchedulerAddFunc)(MDB_txn *txn, MDB_val *hash, PageInfo *pi);
 /** Function to call to retrieve a new page */
-typedef int (SchedulerGetFunc)(MDB_cursor *cur, MDB_val *hash);
+typedef int (SchedulerGetFunc)(MDB_txn *txn, MDB_val *hash);
 
 // TODO Make the building of the links database optional. The are many more links
 // that pages and it takes lot of space to store this structure. We should only
@@ -236,14 +236,14 @@ page_db_link_stream_new(PageDBLinkStream **es, PageDB *db);
 
 /** Rewind stream to the beginning */
 LinkStreamState
-page_db_link_stream_reset(PageDBLinkStream *es);
+page_db_link_stream_reset(void *es);
 
 /** Get next element inside stream.
  *
  * @return @ref ::link_stream_state_next if success
  */
 LinkStreamState
-page_db_link_stream_next(PageDBLinkStream *es, Link *link);
+page_db_link_stream_next(void *es, Link *link);
 
 /** Delete link stream and free any transaction hold inside the database. */
 void

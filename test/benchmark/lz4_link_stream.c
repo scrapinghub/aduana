@@ -51,30 +51,30 @@ lz4_link_stream_add_error(LZ4LinkStream *es, const char *msg) {
 #endif
 
 int
-lz4_link_stream_new(LZ4LinkStream **es, const char *fname) {     
+lz4_link_stream_new(LZ4LinkStream **es, const char *fname) {
      LZ4LinkStream *p = *es = malloc(sizeof(*p));
      if (!p)
 	  return -1;
-     
+
      p->error_msg[0] = p->error_msg[LZ4_LINK_STREAM_MAX_ERROR_LENGTH] = '\0';
 
      if (!(p->fname = malloc(strlen(fname) + 1))) {
 	  lz4_link_stream_set_error(p, "could not malloc fname");
 	  return -1;
-     }     
+     }
      strcpy(p->fname, fname);
      if ((p->fd = open(fname, O_RDONLY)) == -1) {
 	  lz4_link_stream_set_error(p, "could not open fname");
 	  return -1;
      }
-     
+
      p->src_size = file_size(p->fd);
      p->src = mmap(0, p->src_size, PROT_READ, MAP_SHARED, p->fd, 0);
      if (p->src == MAP_FAILED) {
 	  lz4_link_stream_set_error(p, "mmap failed");
 	  return -1;
      }
-     
+
      if (madvise(p->src, p->src_size, MADV_SEQUENTIAL) != 0) {
 	  lz4_link_stream_set_error(p, "madvise failed");
 	  return -1;
@@ -133,7 +133,8 @@ lz4_link_stream_new(LZ4LinkStream **es, const char *fname) {
 
 
 LinkStreamState
-lz4_link_stream_next(LZ4LinkStream *es, Link *next) {
+lz4_link_stream_next(void *st, Link *next) {
+     LZ4LinkStream *es = st;
      // Remaning bytes in destination buffer
      size_t bytes_in_dst = es->dst_size - es->dst_read;
      // Fill additional data inside dst buffer
@@ -184,9 +185,10 @@ lz4_link_stream_next(LZ4LinkStream *es, Link *next) {
 }
 
 LinkStreamState
-lz4_link_stream_reset(LZ4LinkStream *es) {
+lz4_link_stream_reset(void *st) {
+     LZ4LinkStream *es = st;
      char *fname = malloc(strlen(es->fname) + 1);
-     strcpy(fname, es->fname);     
+     strcpy(fname, es->fname);
      lz4_link_stream_delete(es);
 
      if (lz4_link_stream_new(&es, fname) != 0)
@@ -207,7 +209,7 @@ lz4_link_stream_delete(LZ4LinkStream *es) {
      }
      if (LZ4F_isError(LZ4F_freeDecompressionContext(es->ctx))) {
 	  lz4_link_stream_set_error(es, "freeing decompression context");
-	  return -1;	  
+	  return -1;
      }
      free(es->dst);
      free(es->fname);
