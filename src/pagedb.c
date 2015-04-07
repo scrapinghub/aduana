@@ -1686,7 +1686,7 @@ test_page_db_suite(void) {
      SUITE_ADD_TEST(suite, test_page_db_hits);
      SUITE_ADD_TEST(suite, test_page_db_page_rank);
      SUITE_ADD_TEST(suite, test_page_db_requests);
-     //SUITE_ADD_TEST(suite, test_page_db_large);
+     SUITE_ADD_TEST(suite, test_page_db_large);
 
      return suite;
 }
