@@ -74,16 +74,17 @@ page_info_print(const PageInfo *pi, char *out) {
  * @return A pointer to the new structure or NULL if failure
  */
 static PageInfo *
-page_info_new_link(const char *link) {
+page_info_new_link(const char *url, float score) {
      PageInfo *pi = calloc(1, sizeof(*pi));
      if (!pi)
 	  return 0;
 
-     if (!(pi->url = malloc(strlen(link)))) {
+     if (!(pi->url = malloc(strlen(url) + 1))) {
 	  free(pi);
 	  return 0;
      }
-     strcpy(pi->url, link);
+     strcpy(pi->url, url);
+     pi->score = score;
      return pi;
 }
 
@@ -93,7 +94,7 @@ page_info_new_link(const char *link) {
  */
 static PageInfo *
 page_info_new_crawled(const CrawledPage *cp) {
-     PageInfo *pi = page_info_new_link(cp->url);
+     PageInfo *pi = page_info_new_link(cp->url, cp->score);
      if (!pi)
 	  return 0;
 
@@ -107,7 +108,6 @@ page_info_new_crawled(const CrawledPage *cp) {
 	  return 0;
      }
      memcpy(pi->content_hash, cp->content_hash, cp->content_hash_length);
-     pi->score = cp->score;
      return pi;
 }
 
@@ -552,13 +552,13 @@ on_error:
 static int
 page_db_add_link_page_info(MDB_cursor *cur,
 			   MDB_val *key,
-			   char *url,
+			   LinkInfo *link,
 			   PageInfo **page_info,
 			   int *mdb_error) {
      MDB_val val;
      int mdb_rc = 0;
 
-     PageInfo *pi = *page_info = page_info_new_link(url);
+     PageInfo *pi = *page_info = page_info_new_link(link->url, link->score);
      if (!pi)
 	  goto on_error;
 
@@ -646,10 +646,9 @@ txn_start: // return here if the transaction is discarded and must be repeated
 	  goto on_error;
      }
      for (size_t i=0; i <= page->n_links; ++i) {
-	  char *link = i > 0? page->links[i - 1]: 0;
+	  LinkInfo *link = i > 0? (page->links + i - 1): 0;
 	  if (link) {
-	       link = page->links[i - 1];
-	       hash = XXH64(link, strlen(link), 0);
+	       hash = XXH64(link->url, strlen(link->url), 0);
 	       key.mv_size = sizeof(uint64_t);
 	       key.mv_data = &hash;
 	  }
@@ -1077,7 +1076,9 @@ test_page_db_simple(CuTest *tc) {
 
      uint64_t hash1 = 1000;
      uint64_t hash2 = 2000;
-     char *cp1_links[] = {"a", "b", "www.google.com"};
+     LinkInfo cp1_links[] = {
+	  {"a", 0.1}, {"b", 0.2}, {"www.google.com", 0.3}
+     };
      CrawledPage cp1 = {
 	  .url                 = "www.yahoo.com",
 	  .links               = cp1_links,
@@ -1087,7 +1088,9 @@ test_page_db_simple(CuTest *tc) {
 	  .content_hash        = (char*)&hash1,
 	  .content_hash_length = sizeof(hash1)
      };
-     char *cp2_links[] = {"x", "y"};
+     LinkInfo cp2_links[] = {
+	  {"x", 1.1}, {"y", 1.2}
+     };
      CrawledPage cp2 = {
 	  .url                 = "www.bing.com",
 	  .links               = cp2_links,
@@ -1213,21 +1216,24 @@ test_page_db_large(CuTest *tc) {
      const int n_links = 10;
      const int n_pages = 10000000;
 
-     char *urls[n_links + 1];
-     for (int j=0; j<=n_links; ++j)
-	  sprintf(urls[j] = malloc(50), "test_url_%d", j);
+     LinkInfo links[n_links + 1];
+     for (int j=0; j<=n_links; ++j) {
+	  sprintf(links[j].url = malloc(50), "test_url_%d", j);
+	  links[j].score = j;
+     }
 
      for (int i=0; i<n_pages; ++i) {
 	  for (int j=0; j<n_links; ++j)
-	       urls[j] = urls[j+1];
-	  sprintf(urls[n_links], "test_url_%d", i + n_links);
+	       links[j] = links[j+1];
+	  sprintf(links[n_links].url, "test_url_%d", i + n_links);
+	  links[n_links].score = i;
 #if 0
 	  if (i % 100000 == 0)
 	       printf("% 12d\n", i);
 #endif
 	  CrawledPage cp = {
-	       .url                 = urls[0],
-	       .links               = urls + 1,
+	       .url                 = links[0].url,
+	       .links               = links + 1,
 	       .n_links             = n_links,
 	       .time                = i,
 	       .score               = 0.5,
@@ -1308,11 +1314,11 @@ test_page_db_hits(CuTest *tc) {
 	      page_db_new(&db, test_dir) == 0);
 
      char *urls[5] = {"1", "2", "3", "4", "5" };
-     char *links_1[] = {"2", "5"};
-     char *links_2[] = {"3", "5"};
-     char *links_3[] = {"4", "5"};
-     char *links_4[] = {"1", "5"};
-     char **links[5] = {
+     LinkInfo links_1[] = {{"2", 0.1}, {"5", 0.1}};
+     LinkInfo links_2[] = {{"3", 0.1}, {"5", 0.1}};
+     LinkInfo links_3[] = {{"4", 0.1}, {"5", 0.1}};
+     LinkInfo links_4[] = {{"1", 0.1}, {"5", 0.1}};
+     LinkInfo *links[5] = {
 	  links_1, links_2, links_3, links_4, 0
      };
      int n_links[5] = {2, 2, 2, 2, 0};
@@ -1457,13 +1463,14 @@ test_page_db_page_rank(CuTest *tc) {
 	      page_db_new(&db, test_dir) == 0);
 
      char *urls[5] = {"1", "2", "3", "4", "5" };
-     char *links_1[] = {"2", "5"};
-     char *links_2[] = {"3", "5"};
-     char *links_3[] = {"4", "5"};
-     char *links_4[] = {"1", "5"};
-     char **links[5] = {
+     LinkInfo links_1[] = {{"2", 0.1}, {"5", 0.1}};
+     LinkInfo links_2[] = {{"3", 0.1}, {"5", 0.1}};
+     LinkInfo links_3[] = {{"4", 0.1}, {"5", 0.1}};
+     LinkInfo links_4[] = {{"1", 0.1}, {"5", 0.1}};
+     LinkInfo *links[5] = {
 	  links_1, links_2, links_3, links_4, 0
      };
+
      int n_links[5] = {2, 2, 2, 2, 0};
 
      CrawledPage cp;
@@ -1561,28 +1568,28 @@ test_page_db_requests(CuTest *tc) {
       *
       */
      char *urls[6] = {"1", "2", "4", "5", "8", "7" };
-     char ***links = calloc(6, sizeof(*links));
+     LinkInfo *links[6];
      size_t n_links[6] = {2, 1, 2, 3, 2, 0};
 
      links[0] = calloc(2, sizeof(**links)); // 1
-     links[0][0] = "2";
-     links[0][1] = "3";
+     links[0][0].url = "2";
+     links[0][1].url = "3";
 
      links[1] = calloc(1, sizeof(**links)); // 2
-     links[1][0] = "4";
+     links[1][0].url = "4";
 
      links[2] = calloc(2, sizeof(**links)); // 4
-     links[2][0] = "3";
-     links[2][1] = "5";
+     links[2][0].url = "3";
+     links[2][1].url = "5";
 
      links[3] = calloc(3, sizeof(**links)); // 5
-     links[3][0] = "6";
-     links[3][1] = "7";
-     links[3][2] = "8";
+     links[3][0].url = "6";
+     links[3][1].url = "7";
+     links[3][2].url = "8";
 
      links[4] = calloc(2, sizeof(**links)); // 8
-     links[4][0] = "7";
-     links[4][1] = "9";
+     links[4][0].url = "7";
+     links[4][1].url = "9";
 
      links[5] = 0; // 7
 

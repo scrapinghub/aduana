@@ -10,6 +10,11 @@
 
 int 
 main(int argc, char **argv) {
+     if (argc != 2) {
+	  printf("Usage: page_rank path_to_lz4_links\n");
+	  return -1;
+     }
+
      PageRank *pr;
      if (page_rank_new(&pr, "./test_pr", 1000000, 0.85) != 0)
 	  return -1;

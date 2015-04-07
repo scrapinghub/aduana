@@ -20,10 +20,15 @@
 #define MB (1024*KB)
 #define GB (1024*MB
 
+typedef struct {
+     char *url;
+     float score;
+} LinkInfo;
+
 /** The information that comes with a crawled page */
 typedef struct {
      char *url;                   /**< ASCII, null terminated string for the page URL*/
-     char **links;                /**< Each links[i] is also a URL */
+     LinkInfo *links;             /**< links[0] ... links[n_links-1] */
      size_t n_links;              /**< Number of links */
      time_t time;                 /**< UNIX time of the crawl */
      float score;                 /**< A number giving an idea of the page content's value */
