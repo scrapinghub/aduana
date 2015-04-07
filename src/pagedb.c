@@ -239,11 +239,12 @@ page_info_delete(PageInfo *pi) {
  */
 static char info_n_pages[] = "n_pages";
 
+/** Order scores from greater to lower */
 static int
-mdb_cmp_float(const MDB_val *a, const MDB_val *b) {
+mdb_cmp_score(const MDB_val *a, const MDB_val *b) {
      float x = *(float*)(a->mv_data);
      float y = *(float*)(b->mv_data);
-     return x < y? -1: x > y? +1: 0;
+     return x < y? +1: x > y? -1: 0;
 }
 
 static int
@@ -288,7 +289,7 @@ page_db_open_info(MDB_txn *txn, MDB_cursor **cursor) {
 static int
 page_db_open_schedule(MDB_txn *txn, MDB_cursor **cursor) {
      return page_db_open_cursor(
-	  txn, "schedule", MDB_CREATE | MDB_DUPSORT, cursor, mdb_cmp_float);
+	  txn, "schedule", MDB_CREATE | MDB_DUPSORT, cursor, mdb_cmp_score);
 }
 
 /** Best First Search scheduler: add new page */
@@ -311,25 +312,45 @@ bfs_add(MDB_txn *txn, MDB_val *hash, PageInfo *pi) {
 /** Best First Search scheduler: retrieve next page to crawl */
 int
 bfs_get(MDB_txn *txn, MDB_val *hash) {
-     MDB_val key; // stores the score
-     MDB_val val; // stores the hash
-     MDB_cursor *cur;
+     MDB_val key;  // stores the score
+     MDB_val val1; // stores the hash
+     MDB_val val2; // stores the PageInfo
+     MDB_cursor *cur_schedule;
+     MDB_cursor *cur_hash2info;
+
+     hash->mv_size = 0;
+     hash->mv_data = 0;
 
      int mdb_rc =
-	  page_db_open_schedule(txn, &cur) ||
-	  mdb_cursor_get(cur, &key, &val, MDB_FIRST);
-     if (mdb_rc != 0)
-	  return mdb_rc;
+	  page_db_open_schedule(txn, &cur_schedule) ||
+	  page_db_open_hash2info(txn, &cur_hash2info);
 
-     hash->mv_size = val.mv_size;
-     hash->mv_data = malloc(val.mv_size);
-     if (!hash->mv_data)
-	  return -1; // TODO
-     memcpy(hash->mv_data, val.mv_data, val.mv_size);
+     int done = 0;
+     while (!done) {
+	  if ((mdb_rc = mdb_cursor_get(cur_schedule, &key, &val1, MDB_FIRST)) != 0)
+	       goto exit;
+	  if (val1.mv_size > hash->mv_size) {
+	       if (!(hash->mv_data = realloc(hash->mv_data, val1.mv_size))) {
+		    mdb_rc = -1; // TODO
+		    goto exit;
+	       }
+	       hash->mv_size = val1.mv_size;
+	  }
+	  memcpy(hash->mv_data, val1.mv_data, val1.mv_size);
+	  if ((mdb_rc = mdb_cursor_del(cur_schedule, 0)) != 0)
+	       goto exit;
 
-     if ((mdb_rc = mdb_cursor_del(cur, 0)) != 0)
-	  return mdb_rc;
-
+	  if ((mdb_rc = mdb_cursor_get(cur_hash2info, hash, &val2, MDB_SET)) != 0)
+	       goto exit;
+	  PageInfo *pi = page_info_load(&val2);
+	  if (!pi)
+	       goto exit;
+	  done = pi->n_crawls == 0;
+	  free(pi);
+     }
+exit:
+     mdb_cursor_close(cur_schedule);
+     mdb_cursor_close(cur_hash2info);
      return mdb_rc;
 }
 
@@ -1547,52 +1568,66 @@ test_page_db_requests(CuTest *tc) {
 	      db!=0? db->error_msg: "NULL",
 	      page_db_new(&db, test_dir) == 0);
 
-     /* Make the following crawl
+     /* Make the link structure
       *
-      *  0.2    0.2    0.3    0.1     0.4
+      *      0.0    1.0    0.1    0.5    0.4
       *   1 ---> 2 ---->4----->5------>8----->9
       *   |             |      |       |
-      *   |      +------+   +--+--+    |
-      *   |      |          |     |    |
-      *   |      v          v     v    |
+      *   |      +------+   +--+--+    |0.2
+      *   |      | 0.2   0.0|  0.5|    |
+      *   | 0.1  v          v     v    |
       *   +----> 3          6     7<---+
-      *                          0.5
-      *
-      *  After crawling pages 1, 2, 4, 5, 8 and 7 we have the following queue:
-      *
-      *  page  score
-      *  ----  ----
-      *  9     0.4
-      *  3     0.2
-      *  6     0.1
       *
       */
+     LinkInfo links_1[] = {
+	  {.url = "2", .score = 0.0},
+	  {.url = "3", .score = 0.1}
+     };
+     LinkInfo links_2[] = {
+	  {.url = "4", .score = 1.0}
+     };
+     LinkInfo links_4[] = {
+	  {.url = "3", .score = 0.2},
+	  {.url = "5", .score = 0.1}
+     };
+     LinkInfo links_5[] = {
+	  {.url = "6", .score = 0.0},
+	  {.url = "7", .score = 0.5},
+	  {.url = "8", .score = 0.5}
+     };
+     LinkInfo links_8[] = {
+	  {.url = "7", .score = 0.2},
+	  {.url = "9", .score = 0.4}
+     };
+
+     LinkInfo *links_7 = 0;
+
+     LinkInfo *links[] = {
+	  links_1, links_2, links_4, links_5, links_8, links_7
+     };
      char *urls[6] = {"1", "2", "4", "5", "8", "7" };
-     LinkInfo *links[6];
      size_t n_links[6] = {2, 1, 2, 3, 2, 0};
 
-     links[0] = calloc(2, sizeof(**links)); // 1
-     links[0][0].url = "2";
-     links[0][1].url = "3";
-
-     links[1] = calloc(1, sizeof(**links)); // 2
-     links[1][0].url = "4";
-
-     links[2] = calloc(2, sizeof(**links)); // 4
-     links[2][0].url = "3";
-     links[2][1].url = "5";
-
-     links[3] = calloc(3, sizeof(**links)); // 5
-     links[3][0].url = "6";
-     links[3][1].url = "7";
-     links[3][2].url = "8";
-
-     links[4] = calloc(2, sizeof(**links)); // 8
-     links[4][0].url = "7";
-     links[4][1].url = "9";
-
-     links[5] = 0; // 7
-
+     /* We have the following schedule after crawling pages 1, 2, 4, 5, 8 and 7
+      * Note:
+      *    - x: the page has been crawled
+      *    - n: the link has not been added because it was already present
+      *
+      *     1           2           4           5           8           7
+      * page score  page score  page score  page score  page score  page score
+      * ---- -----  ---- -----  ---- -----  ---- -----  ---- -----  ---- -----
+      * 3    0.1    4    1.0    4    1.0 x  4    1.0 x  4    1.0 x  4    1.0 x
+      * 2    0.0    3    0.1    3    0.2 n  7    0.5    7    0.5    7    0.5 x
+      *             2    0.0 x  3    0.1    8    0.5    8    0.5 x  8    0.5 x
+      *                         5    0.1    3    0.2 n  9    0.4    9    0.4
+      *                         2    0.0 x  3    0.1    3    0.2 n  3    0.2 n
+      *                                     5    0.1 x  7    0.2 n  7    0.2 n
+      *                                     6    0.0    3    0.1    3    0.1
+					    2    0.0 x  5    0.1 x  5    0.1 x
+      *                                                 6    0.0    6    0.0
+      *                                                 2    0.0 x  2    0.0 x
+      *
+      */
      CrawledPage cp;
      for (int i=0; i<6; ++i) {
 	  cp.url = urls[i];
@@ -1608,13 +1643,34 @@ test_page_db_requests(CuTest *tc) {
 		   page_db_add(db, &cp) == 0);
      }
 
-     PageInfo *pi[2];
+     /* Requests should return:
+      *
+      * page score
+      * ---- -----
+      * 9    0.4
+      * 3    0.1
+      * 6    0.0
+      */
+     PageInfo *pi[10] = {0};
      CuAssert(tc,
 	      db->error_msg,
 	      page_db_request(db, 2, pi) == 0);
+
+     CuAssertStrEquals(tc, "9", pi[0]->url);
+     CuAssertStrEquals(tc, "3", pi[1]->url);
+
+     for (size_t i=0; i<10; ++i)
+	  free(pi[i]);
+
      CuAssert(tc,
 	      db->error_msg,
-	      page_db_request(db, 2, pi) == 0);
+	      page_db_request(db, 4, pi) == 0);
+
+     CuAssertStrEquals(tc, "6", pi[0]->url);
+     CuAssert(tc, "too many requests returned", pi[1] == 0);
+
+     for (size_t i=0; i<10; ++i)
+	  free(pi[i]);
 
      page_db_delete(db);
      remove(data);
@@ -1630,7 +1686,7 @@ test_page_db_suite(void) {
      SUITE_ADD_TEST(suite, test_page_db_hits);
      SUITE_ADD_TEST(suite, test_page_db_page_rank);
      SUITE_ADD_TEST(suite, test_page_db_requests);
-     SUITE_ADD_TEST(suite, test_page_db_large);
+     //SUITE_ADD_TEST(suite, test_page_db_large);
 
      return suite;
 }
