@@ -11,7 +11,7 @@ set(CMAKE_C_FLAGS_RELEASE  "${CMAKE_C_FLAGS_RELEASE} -O3")
 
 # External libraries
 ############################################################
-add_library(xxhash STATIC
+add_library(xxhash SHARED
   lib/xxhash.c
 )
 include_directories(
@@ -19,7 +19,7 @@ include_directories(
 )
 
 add_definitions(-DMDB_MAXKEYSIZE=500)
-add_library(lmdb STATIC
+add_library(lmdb SHARED
   lib/lmdb/mdb.c
   lib/lmdb/midl.c
 )
@@ -29,7 +29,7 @@ include_directories(
 
 # Common code
 ############################################################
-add_library(pagedb STATIC
+add_library(pagedb SHARED
   src/mmap_array.c
   src/pagedb.c
   src/hits.c
@@ -80,7 +80,7 @@ target_link_libraries(urldb hat-trie lmdb xxhash)
 #############################################################
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
   add_definitions(-DTEST)
-  add_library(CuTest STATIC
+  add_library(CuTest SHARED
     test/CuTest.c
   )
   include_directories(test)
