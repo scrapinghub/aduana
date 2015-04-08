@@ -15,8 +15,15 @@ main(int argc, char **argv) {
 	  return -1;
      }
 
+     char test_dir[] = "test-hits-XXXXXX";
+     mkdtemp(test_dir);
+     char data[] = "test-hits-XXXXXX/data.mdb";
+     char lock[] = "test-hits-XXXXXX/lock.mdb";
+     for (size_t i=0; test_dir[i] != 0; i++)
+	  data[i] = lock[i] = test_dir[i];
+
      Hits *hits;
-     if (hits_new(&hits, "./test_hits", 1000000) != 0) 
+     if (hits_new(&hits, test_dir, 1000000) != 0) 
 	  return -1;
      printf("Initialized HITS\n");
 
@@ -40,5 +47,9 @@ main(int argc, char **argv) {
 #endif
 
      hits_delete(hits);
+
+     remove(data);
+     remove(lock);
+     remove(test_dir);
      return 0;
 }

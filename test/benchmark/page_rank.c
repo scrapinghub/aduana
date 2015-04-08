@@ -15,8 +15,15 @@ main(int argc, char **argv) {
 	  return -1;
      }
 
+     char test_dir[] = "test-page-rank-XXXXXX";
+     mkdtemp(test_dir);
+     char data[] = "test-page-rank-XXXXXX/data.mdb";
+     char lock[] = "test-page-rank-XXXXXX/lock.mdb";
+     for (size_t i=0; test_dir[i] != 0; i++)
+	  data[i] = lock[i] = test_dir[i];
+
      PageRank *pr;
-     if (page_rank_new(&pr, "./test_pr", 1000000, 0.85) != 0)
+     if (page_rank_new(&pr, test_dir, 1000000, 0.85) != 0)
 	  return -1;
 
      printf("Initialized PageRank\n");
@@ -38,5 +45,9 @@ main(int argc, char **argv) {
 #endif
 
      page_rank_delete(pr);
+
+     remove(data);
+     remove(lock);
+     remove(test_dir);
      return 0;
 }
