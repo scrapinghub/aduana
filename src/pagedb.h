@@ -26,16 +26,57 @@ typedef struct {
      float score; /**< An estimated value of the link score */
 } LinkInfo;
 
+/** Allocate at least this amount of memory for link info */
+#define PAGE_LINKS_MIN_LINKS 10
+
+typedef struct {
+     LinkInfo *link_info; /**< Array of LinkInfo */
+     size_t n_links;      /**< Number of items inside link_info */
+     size_t m_links;      /**< Maximum number of items that can be stored inside link_info */
+} PageLinks;
+
 /** The information that comes with a crawled page */
 typedef struct {
      char *url;                   /**< ASCII, null terminated string for the page URL*/
-     LinkInfo *links;             /**< links[0] ... links[n_links-1] */
-     size_t n_links;              /**< Number of links */
-     time_t time;                 /**< UNIX time of the crawl */
+     PageLinks *links;
+     double time;                 /**< Number of seconds since epoch */
      float score;                 /**< A number giving an idea of the page content's value */
      char *content_hash;          /**< A hash to detect content change since last crawl. Arbitrary byte sequence */
      size_t content_hash_length;  /**< Number of byes of the content_hash */
 } CrawledPage;
+
+/** Create a new CrawledPage
+
+    The following defaults are used for the different fields:
+    - links: no links initially
+    - time: current time
+    - score: 0
+    - content_hash: NULL
+
+    @return NULL if failure, otherwise a newly allocated CrawledPage
+*/
+CrawledPage *
+crawled_page_new(const char *url);
+
+/** Delete a Crawled Page created with @ref crawled_page_new */
+void
+crawled_page_delete(CrawledPage *cp);
+
+/** Set content hash from a 64bit hash */
+int
+crawled_page_set_hash64(CrawledPage *cp, uint64_t hash);
+
+/** Add a new link to the crawled page */
+int
+crawled_page_add_link(CrawledPage *cp, const char *url, float score);
+
+/** Get number of links inside page */
+size_t
+crawled_page_n_links(const CrawledPage *cp);
+
+/** Get a pointer to the link */
+const LinkInfo *
+crawled_page_get_link(const CrawledPage *cp, size_t i);
 
 /// @addtogroup PageInfo
 /// @{
@@ -43,8 +84,8 @@ typedef struct {
 /** The information we keep about crawled and uncrawled pages */
 typedef struct {
      char *url;                   /**< A copy of either @ref CrawledPage::url or @ref CrawledPage::links[i] */
-     time_t first_crawl;          /**< First UNIX time this page was crawled */
-     time_t last_crawl;           /**< Last UNIX time this page was crawled */
+     double first_crawl;          /**< First time this page was crawled */
+     double last_crawl;           /**< Last time this page was crawled */
      size_t n_changes;            /**< Number of content changes detected between first and last crawl */
      size_t n_crawls;             /**< Number of times this page has crawled. Can be zero if it has been observed just as a link*/
      float score;                 /**< A copy of the same field at the last crawl */
@@ -56,7 +97,7 @@ typedef struct {
 
     This function is intended mainly for debugging and development.
     The representation is:
-	first_crawl last_crawl n_crawls n_changes url
+        first_crawl last_crawl n_crawls n_changes url
 
     Each field is separated with an space. The string is null terminated.
     We use the following format for each field:
@@ -66,7 +107,7 @@ typedef struct {
     - n_crawls: To ensure fixed size representation this value is converted
       to double and represented in exponential notation with two digits. It has
       therefore always 8 bytes length:
-	    1.21e+01
+            1.21e+01
     - n_changes: The same as n_crawls
     - url: This is the only variable length field. However, it is truncated at
       512 bytes length.
@@ -184,17 +225,30 @@ page_db_get_info(PageDB *db, const char *url, PageInfo **pi);
 PageDBError
 page_db_get_idx(PageDB *db, const char *url, uint64_t *idx);
 
-/** Retrieve an array of the next pages that should be crawled, 
+/** A request is made by an array of URLS */
+typedef struct {
+     char **urls;
+     size_t n_urls;
+} PageRequest;
+
+PageRequest*
+page_request_new(size_t n_urls);
+
+void
+page_request_delete(PageRequest *req);
+
+int
+page_request_add_url(PageRequest *req, const char *url);
+
+/** Retrieve an array of the next pages that should be crawled,
     according to the scheduler.
 
     @param db The database
     @param n_pages The maximum number of pages
-    @param pi An array of @ref n_pages @ref PageInfo pointers. 
-              If less than @ref n_pages are retrieved the remaining elements of 
-	      the array are set to NULL
+    @param req
  */
 PageDBError
-page_db_request(PageDB *db, size_t n_pages, PageInfo **pi);
+page_db_request(PageDB *db, size_t n_pages, PageRequest **request);
 
 /** Close database */
 void
