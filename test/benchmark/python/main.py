@@ -4,7 +4,7 @@ import bcolz
 from pagerank import PageRank
 
 if __name__ == '__main__':
-    pr = PageRank(n_pages=4e9)
+    pr = PageRank(n_pages=70e6)
     print 'Computing pages out degree'
 
     n_files = len(sys.argv) - 1

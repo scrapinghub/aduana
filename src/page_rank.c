@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <inttypes.h>
 #include <malloc.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -48,7 +49,7 @@ page_rank_new(PageRank **pr, const char *path, size_t max_vertices, float dampin
 
      p->damping = damping;
      p->n_pages = 0;
-     p->initialized = 0;
+     p->max_loops = 0;
      page_rank_set_error(p, page_rank_error_ok, "NO ERROR");
 
      char *error1 = 0;
@@ -80,6 +81,8 @@ page_rank_new(PageRank **pr, const char *path, size_t max_vertices, float dampin
 	  error2 = p->value1->error_msg;
 	  goto on_error;
      }
+
+     // Initialize value1 with equal PageRank score
      const float v0 = 1.0/(float)p->value1->n_elements;
      for (size_t i=0; i<p->value1->n_elements; ++i)
 	  if (mmap_array_set(p->value1, i, &v0) != 0) {
@@ -91,26 +94,6 @@ page_rank_new(PageRank **pr, const char *path, size_t max_vertices, float dampin
      if (mmap_array_advise(p->value1, MADV_DONTNEED) != 0) {
 	  error1 = "value1";
 	  error2 = p->value1->error_msg;
-	  goto on_error;
-     }
-
-     /* Probably unnecessary. ftruncate fills the file with the '\0' char.
-	In turn, IEEE standard defines 0.0 with all bits 0 */
-     if (mmap_array_advise(p->out_degree, MADV_SEQUENTIAL) != 0) {
-	  error1 = "out_degree";
-	  error2 = p->out_degree->error_msg;
-	  goto on_error;
-     }
-     const float zero = 0.0;
-     for (size_t i=0; i<p->out_degree->n_elements; ++i)
-	  if (mmap_array_set(p->out_degree, i, &zero) != 0) {
-	       error1 = "setting out_degree value";
-	       error2 = p->out_degree->error_msg;
-	  }
-
-     if (mmap_array_advise(p->out_degree, MADV_DONTNEED) != 0) {
-	  error1 = "out_degree";
-	  error2 = p->out_degree->error_msg;
 	  goto on_error;
      }
 
@@ -184,6 +167,8 @@ page_rank_set_n_pages(PageRank *pr, size_t n_pages) {
      return 0;
 }
 
+// 1. Expand the mmap array until is big enough
+// 2. Compute the out degree
 static PageRankError
 page_rank_init(PageRank *pr,
 	       void *link_stream_state,
@@ -193,10 +178,11 @@ page_rank_init(PageRank *pr,
      char *error2 = 0;
 
      if (mmap_array_advise(pr->out_degree, MADV_SEQUENTIAL) != 0) {
-	  error1 = "resizing out_degree";
+	  error1 = "advising out_degree on sequential access";
 	  error2 = pr->out_degree->error_msg;
 	  goto on_error;
      }
+     mmap_array_zero(pr->out_degree);
 
      Link link;
      int end_stream = 0;
@@ -224,82 +210,21 @@ page_rank_init(PageRank *pr,
 	  }
      } while (!end_stream);
 
-     return 0;
-
-on_error:
-     page_rank_set_error(pr, page_rank_error_internal, __func__);
-     if (error1 != 0)
-	  page_rank_add_error(pr, error1);
-     if (error2 != 0)
-	  page_rank_add_error(pr, error2);
-     return pr->error;
-}
-
-static PageRankError
-page_rank_begin_loop(PageRank *pr) {
-     char *error1 = 0;
-     char *error2 = 0;
-     if (mmap_array_advise(pr->out_degree, MADV_SEQUENTIAL) != 0) {
-	  error1 = "out_degree";
-	  error2 = pr->out_degree->error_msg;
-	  goto on_error;
-     }
+     // Since its possible that the number of pages has changed, renormalize
      if (mmap_array_advise(pr->value1, MADV_SEQUENTIAL) != 0) {
-	  error1 = "value1";
+	  error1 = "advising out_degree on sequential access";
 	  error2 = pr->value1->error_msg;
 	  goto on_error;
      }
-
-     float d = 0.0;
+     float sum = 0.0;
      for (size_t i=0; i<pr->n_pages; ++i) {
-	  float *out_degree = mmap_array_idx(pr->out_degree, i);
-	  if (!out_degree)
-	       return page_rank_error_internal;
-
-	  float *value1 = mmap_array_idx(pr->value1, i);
-	  if (!value1)
-	       return page_rank_error_internal;
-
-	  if (*out_degree > 0)
-	       d += (1.0 - pr->damping)*(*value1);
-	  else
-	       d += *value1;
+	  float *score = mmap_array_idx(pr->value1, i);
+	  sum += *score;
      }
-     d /= pr->n_pages;
-
      for (size_t i=0; i<pr->n_pages; ++i) {
-	  float *out_degree = mmap_array_idx(pr->out_degree, i);
-	  if (!out_degree)
-	       return page_rank_error_internal;
-
-	  if (*out_degree > 0) {
-	       float *value1 = mmap_array_idx(pr->value1, i);
-	       if (!value1)
-		    return page_rank_error_internal;
-	       *value1 *= pr->damping/(*out_degree);
-	  }
+	  float *score = mmap_array_idx(pr->value1, i);
+	  *score /= sum;
      }
-
-     if (mmap_array_advise(pr->out_degree, MADV_DONTNEED) != 0) {
-	  error1 = "out_degree";
-	  error2 = pr->out_degree->error_msg;
-	  goto on_error;
-     }
-     if (mmap_array_advise(pr->value1, MADV_DONTNEED) != 0) {
-	  error1 = "value1";
-	  error2 = pr->value1->error_msg;
-	  goto on_error;
-     }
-     if (mmap_array_advise(pr->value2, MADV_SEQUENTIAL) != 0) {
-	  error1 = "value2";
-	  error2 = pr->value2->error_msg;
-	  goto on_error;
-     }
-
-     for (size_t i=0; i<pr->n_pages; ++i)
-	  if (mmap_array_set(pr->value2, i, &d) != 0)
-	       return page_rank_error_internal;
-
      return 0;
 
 on_error:
@@ -318,21 +243,34 @@ page_rank_loop(PageRank *pr,
      char *error1 = 0;
      char *error2 = 0;
 
-     if (mmap_array_advise(pr->value2, MADV_RANDOM) != 0) {
-	  error1 = "value2";
+     // Clear value2 scores
+     if (mmap_array_advise(pr->value2, MADV_SEQUENTIAL) != 0) {
+	  error1 = "advising value2 on sequential access";
 	  error2 = pr->value2->error_msg;
 	  goto on_error;
      }
+     mmap_array_zero(pr->value2);
+
      if (mmap_array_advise(pr->value1, MADV_SEQUENTIAL) != 0) {
 	  error1 = "value1";
 	  error2 = pr->value1->error_msg;
 	  goto on_error;
      }
-
+     if (mmap_array_advise(pr->out_degree, MADV_SEQUENTIAL) != 0) {
+	  error1 = "out_degree";
+	  error2 = pr->out_degree->error_msg;
+	  goto on_error;
+     }
+     if (mmap_array_advise(pr->value2, MADV_RANDOM) != 0) {
+	  error1 = "value2";
+	  error2 = pr->value2->error_msg;
+	  goto on_error;
+     }
      Link link;
      int end_stream = 0;
      float *value1;
      float *value2;
+     float *degree;
      do {
 	  switch(link_stream_next(link_stream_state, &link)) {
 	  case link_stream_state_init:
@@ -343,11 +281,12 @@ page_rank_loop(PageRank *pr,
 	       end_stream = 1;
 	       break;
 	  case link_stream_state_next:
+	       degree = mmap_array_idx(pr->out_degree, link.from);
 	       value1 = mmap_array_idx(pr->value1, link.from);
 	       value2 = mmap_array_idx(pr->value2, link.to);
-	       if (!value1 || !value2)
+	       if (!value1 || !value2 || !degree)
 		    return page_rank_error_internal;
-	       *value2 += *value1;
+	       *value2 += pr->damping*(*value1)/(*degree);
 	       break;
 	  }
      } while (!end_stream);
@@ -363,36 +302,84 @@ on_error:
      return pr->error;
 }
 
-static void
-page_rank_end_loop(PageRank *pr) {
-     memcpy(pr->value1->mem,
-	    pr->value2->mem,
-	    pr->value2->n_elements*pr->value2->element_size);
+static PageRankError
+page_rank_end_loop(PageRank *pr, float *delta) {
+     char *error1 = 0;
+     char *error2 = 0;
+
+     float *score1;
+     float *score2;
+
+     if (mmap_array_advise(pr->value2, MADV_SEQUENTIAL) != 0) {
+	  error1 = "value2";
+	  error2 = pr->value2->error_msg;
+	  goto on_error;
+     }
+
+     float sum = 0.0;
+     for (size_t i=0; i<pr->n_pages; ++i) {
+	  float *score = mmap_array_idx(pr->value2, i);
+	  sum += *score;
+     }
+     sum = (1.0 - sum)/pr->n_pages;
+
+     for (size_t i=0; i<pr->n_pages; ++i) {
+	  float *score = mmap_array_idx(pr->value2, i);
+	  *score += sum;
+     }
+
+     *delta = 0.0;
+     for (size_t i=0; i<pr->n_pages; ++i) {
+	  score1 = mmap_array_idx(pr->value1, i);
+	  score2 = mmap_array_idx(pr->value2, i);
+	  if (!score1 || !score2) {
+	       error1 = "accessing value1 and value";
+	       goto on_error;
+	  }
+	  float diff = fabs(*score2 - *score1);
+	  if (diff > *delta)
+	       *delta = diff;
+	  *score1 = *score2;
+     }
+     return 0;
+on_error:
+     page_rank_set_error(pr, page_rank_error_internal, __func__);
+     if (error1 != 0)
+	  page_rank_add_error(pr, error1);
+     if (error2 != 0)
+	  page_rank_add_error(pr, error2);
+     return pr->error;
 }
 
 PageRankError
 page_rank_compute(PageRank *pr,
 		  void *link_stream_state,
 		  LinkStreamNextFunc *link_stream_next,
-		  LinkStreamResetFunc *link_stream_reset) {
+		  LinkStreamResetFunc *link_stream_reset,
+		  float precision) {
 
      PageRankError rc = 0;
-     if (!pr->initialized) {
-	  if ((rc = page_rank_init(pr, link_stream_state, link_stream_next)) != 0)
-	       return rc;
-	  if (link_stream_reset(link_stream_state) != 0)
-	       return page_rank_error_internal;
-	  pr->initialized = 1;
-     }
-     // TODO stop iteration when desired precision achieved
-     for (int i=0; i<30; ++i) {
-	  rc = page_rank_begin_loop(pr) ||
-	       page_rank_loop(pr, link_stream_state, link_stream_next);
+
+     if ((rc = page_rank_init(pr, link_stream_state, link_stream_next)) != 0)
+	  return rc;
+     if (link_stream_reset(link_stream_state) != 0)
+	  return page_rank_error_internal;
+
+     float delta = precision + 1.0;
+     size_t n_loops = 0;
+     while (delta > precision) {
+	  rc = page_rank_loop(pr, link_stream_state, link_stream_next);
 	  if (rc != 0)
 	       return rc;
 	  if (link_stream_reset(link_stream_state) == link_stream_state_error)
 	       return page_rank_error_internal;
-	  page_rank_end_loop(pr);
+	  rc = page_rank_end_loop(pr, &delta);
+	  if (rc != 0)
+	       return rc;
+
+	  ++n_loops;
+	  if (n_loops == pr->max_loops)
+	       return page_rank_error_precision;
      }
 
      return 0;

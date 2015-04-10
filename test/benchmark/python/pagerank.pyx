@@ -15,9 +15,9 @@ class PageRank(object):
 
         N = int(n_pages)
 
-        self.pr1 = np.memmap('/dev/zram0', dtype=np.float32, mode='w+', shape=(N,))
-        self.pr2 = np.memmap('/dev/zram1', dtype=np.float32, mode='w+', shape=(N,))
-        self.out_degree = np.memmap('/dev/zram2', dtype=np.float32, mode='w+', shape=(N,))
+        self.pr1 = np.memmap('./pr1.bin', dtype=np.float32, mode='w+', shape=(N,))
+        self.pr2 = np.memmap('./pr2.bin', dtype=np.float32, mode='w+', shape=(N,))
+        self.out_degree = np.memmap('./out_degree.bin', dtype=np.float32, mode='w+', shape=(N,))
 
         #self.pr1 = np.memmap('/tmp/v0', dtype=np.float32, mode='w+', shape=(N,))
         #self.pr2 = np.memmap('/tmp/v1', dtype=np.float32, mode='w+', shape=(N,))

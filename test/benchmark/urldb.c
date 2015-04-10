@@ -1,24 +1,38 @@
 #define _POSIX_C_SOURCE  200809L
 #define _BSD_SOURCE
 
-/* We need the following operations:
+/* How to check if a page has been already been added to the database?
+   We cannot add URL's directly as keys since we need to setup a maximum
+   key size. We could make key sizes long enough, say, 3000 characters but
+   I have a bad feeling about that.
 
-   + Translate URL
-     For a given URL test if already in the database. If true, then
-     return its index. If false assign new index. For example:
+   Insted, we hash all URLs using 64 bit hashes, even for huge crawls we get
+   something only in the order of 2^32 different URLs, which is small enough
+   to assume there are no collisions. Neverthless I did some tests using
+   the URLs directly as keys. Note that timings also include the time to read the
+   file, detect URL limits and compute whatever hash if necessary.
 
-     www.google.com -> (in_db = true , index = 123  )
-     www.yahoo.com  -> (in_db = false, index = 10009)
+   Results with LMDB and XXHASH:
 
-   + A new URL arrives, with a list of links
-     1. Translate all URLS
-     2. For all not already present links, add them to the database
-     3. If the URL already in the database:
-            Delete all existing edges starting at the URL
-     4. Add all edges
+      1. String keys must be terminated with '\0', otherwise some keys are not retrieved!
+      2. Some string keys fail to be retrieved, usually with weird characters inside
+      2. Directly inserting the strings instead of hashes is MUCH faster (54M urls),
+         but query performance is better with hashes:
+         a. Average insert time:
+              string: 0.7e-6
+              hash  : 5.1e-6
+         b. Average query time:
+              string: 3.0e-6
+              hash  : 1.3e-6
 
-   + Transverse the list of edges. Ideally it would be great if done in an
-     arbitrary order.
+    Results with hat-trie (https://github.com/dcjones/hat-trie):
+
+      1. Timings:
+         a. Average insert time: 1.2e-6
+         b. Average query time : 1.3e-6
+
+    Although hat-trie gives better results LMDB performance is very good and has much
+    more features.
 */
 
 #include <stdio.h>
@@ -32,7 +46,7 @@
 #include "xxhash.h"
 
 #define MAX_LINE_LENGTH 10000
-#define HASH_URL 0
+#define HASH_URL 1
 
 int
 main(void) {

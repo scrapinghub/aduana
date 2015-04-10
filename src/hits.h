@@ -9,7 +9,8 @@
 typedef enum {
      hits_error_ok = 0,
      hits_error_memory,
-     hits_error_internal
+     hits_error_internal,
+     hits_error_precision
 } HitsError;
 
 typedef struct {
@@ -23,6 +24,9 @@ typedef struct {
      HitsError error; /**< Last error */
      /** A message with a meaningful description of the error */
      char error_msg[HITS_MAX_ERROR_LENGTH+1];
+
+     /** If greater than 0 stop computation even if precision was not achieved */
+     size_t max_loops;
 } Hits;
 
 HitsError
@@ -38,6 +42,7 @@ HitsError
 hits_compute(Hits *hits, 
 	     void *link_stream_state,
 	     LinkStreamNextFunc *link_stream_next,
-	     LinkStreamResetFunc *link_stream_reset);
+	     LinkStreamResetFunc *link_stream_reset,
+             float precision);
 
 #endif // _HITS_H

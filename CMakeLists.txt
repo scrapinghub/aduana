@@ -7,7 +7,7 @@ set(WARNING_FLAGS
 set(CMAKE_C_FLAGS 
   "-std=c99 -m64 -msse2 -pthread ${WARNING_FLAGS}")
 
-set(CMAKE_C_FLAGS_RELEASE  "${CMAKE_C_FLAGS_RELEASE} -O3")
+set(CMAKE_C_FLAGS_RELEASE  "${CMAKE_C_FLAGS_RELEASE} -O3 -DDONT_CHECK_BOUNDS=1")
 
 # External libraries
 ############################################################

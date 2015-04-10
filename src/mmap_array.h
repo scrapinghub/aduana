@@ -81,6 +81,10 @@ mmap_array_idx(MMapArray *marr, size_t n);
 MMapArrayError
 mmap_array_set(MMapArray *marr, size_t n, const void *x);
 
+/** Set all elements of array to zero */
+void
+mmap_array_zero(MMapArray *marr);
+
 /** Change number of elements
  *
  * The new memort is initialized to 0

@@ -20,7 +20,14 @@
 #define MB (1024*KB)
 #define GB (1024*MB
 
-/** The information that comes with a link inside a crawled page */
+/// @addtogroup CrawledPage
+/// @{
+/** The information that comes with a link inside a crawled page.
+ *
+ * The link score is used to decide which links should be crawled next. It 
+ * is application dependent and tipically computed by looking at the link
+ * surrounding text.
+ */
 typedef struct {
      char *url;   /**< ASCII, null terminated string for the page URL*/
      float score; /**< An estimated value of the link score */
@@ -29,6 +36,16 @@ typedef struct {
 /** Allocate at least this amount of memory for link info */
 #define PAGE_LINKS_MIN_LINKS 10
 
+/** A (resizable) array of page links.
+ *
+ * Initially:
+ *   n_links = 0
+ *   m_links = PAGE_LINKS_MIN_LINKS
+ *
+ * Always:
+ *   0 <= n_links <= m_links
+ *
+ * */
 typedef struct {
      LinkInfo *link_info; /**< Array of LinkInfo */
      size_t n_links;      /**< Number of items inside link_info */
@@ -38,20 +55,23 @@ typedef struct {
 /** The information that comes with a crawled page */
 typedef struct {
      char *url;                   /**< ASCII, null terminated string for the page URL*/
-     PageLinks *links;
+     PageLinks *links;            /**< List of links inside this page */
      double time;                 /**< Number of seconds since epoch */
      float score;                 /**< A number giving an idea of the page content's value */
-     char *content_hash;          /**< A hash to detect content change since last crawl. Arbitrary byte sequence */
+     char *content_hash;          /**< A hash to detect content change since last crawl. 
+                                       Arbitrary byte sequence */
      size_t content_hash_length;  /**< Number of byes of the content_hash */
 } CrawledPage;
 
 /** Create a new CrawledPage
 
+    url is a new copy
+
     The following defaults are used for the different fields:
-    - links: no links initially
+    - links: no links initially. Use crawled_page_add_link to add some.
     - time: current time
-    - score: 0
-    - content_hash: NULL
+    - score: 0. It can be setted directly.
+    - content_hash: NULL. Use crawled_page_set_hash to change
 
     @return NULL if failure, otherwise a newly allocated CrawledPage
 */
@@ -62,9 +82,24 @@ crawled_page_new(const char *url);
 void
 crawled_page_delete(CrawledPage *cp);
 
+/** Set content hash
+ *
+ * The hash is a new copy
+ */
+int 
+crawled_page_set_hash(CrawledPage *cp, const char *hash, size_t hash_length);
+
+/** Set content hash from a 128bit hash */
+int
+crawled_page_set_hash128(CrawledPage *cp, char *hash);
+
 /** Set content hash from a 64bit hash */
 int
 crawled_page_set_hash64(CrawledPage *cp, uint64_t hash);
+
+/** Set content hash from a 32bit hash */
+int
+crawled_page_set_hash32(CrawledPage *cp, uint32_t hash);
 
 /** Add a new link to the crawled page */
 int
@@ -78,10 +113,16 @@ crawled_page_n_links(const CrawledPage *cp);
 const LinkInfo *
 crawled_page_get_link(const CrawledPage *cp, size_t i);
 
+/// @}
+
 /// @addtogroup PageInfo
 /// @{
 
-/** The information we keep about crawled and uncrawled pages */
+/** The information we keep about crawled and uncrawled pages
+ *
+ * @ref PageInfo are created at the @ref PageDB, that's why there are
+ * no public constructors/destructors available.
+ */
 typedef struct {
      char *url;                   /**< A copy of either @ref CrawledPage::url or @ref CrawledPage::links[i] */
      double first_crawl;          /**< First time this page was crawled */
@@ -127,7 +168,7 @@ page_info_delete(PageInfo *pi);
 /// @addtogroup PageDB
 /// @{
 #define PAGE_DB_MAX_ERROR_LENGTH 10000
-#define PAGE_DB_DEFAULT_SIZE 100*MB
+#define PAGE_DB_DEFAULT_SIZE 100*MB /**< Initial size of the mmap region */
 
 typedef enum {
      page_db_error_ok = 0,       /**< No error */
@@ -167,8 +208,8 @@ typedef int (SchedulerGetFunc)(MDB_txn *txn, MDB_val *hash);
 typedef struct {
      MDB_env *env;
 
-     SchedulerAddFunc *sched_add;
-     SchedulerGetFunc *sched_get;
+     SchedulerAddFunc *sched_add; /** Callback when a a page is added */
+     SchedulerGetFunc *sched_get; /** Callback to retrieve new requests */
 
      PageDBError error;
      /** A descriptive message associated with @ref error */
@@ -225,7 +266,7 @@ page_db_get_info(PageDB *db, const char *url, PageInfo **pi);
 PageDBError
 page_db_get_idx(PageDB *db, const char *url, uint64_t *idx);
 
-/** A request is made by an array of URLS */
+/** A request is an array of URLS */
 typedef struct {
      char **urls;
      size_t n_urls;
@@ -313,7 +354,7 @@ page_db_link_stream_delete(PageDBLinkStream *es);
 char *
 build_path(const char *path, const char *fname);
 
-#if TEST
+#if (defined TEST) && TEST
 #include "CuTest.h"
 CuSuite *
 test_page_db_suite(void);

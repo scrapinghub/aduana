@@ -152,6 +152,11 @@ mmap_array_set(MMapArray *marr, size_t n, const void *x) {
      return marr->error;
 }
 
+void
+mmap_array_zero(MMapArray *marr) {
+     memset(marr->mem, 0, marr->n_elements*marr->element_size);
+}
+
 MMapArrayError
 mmap_array_delete(MMapArray *marr) {
      int errno_cp = 0;

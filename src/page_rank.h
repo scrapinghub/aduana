@@ -10,7 +10,8 @@
 typedef enum {
      page_rank_error_ok = 0,
      page_rank_error_memory,
-     page_rank_error_internal
+     page_rank_error_internal,
+     page_rank_error_precision
 } PageRankError;
 
 typedef struct {
@@ -25,9 +26,8 @@ typedef struct {
      /** A message with a meaningful description of the error */
      char error_msg[PAGE_RANK_MAX_ERROR_LENGTH+1];
 
-     /** This flag allow us to execute certain operations just the
-	 first time Page Rank is computed */
-     int initialized;
+     /** If greater than 0 stop computation even if precision was not achieved */
+     size_t max_loops;
 } PageRank;
 
 PageRankError
@@ -43,6 +43,7 @@ PageRankError
 page_rank_compute(PageRank *pr,
 		  void *link_stream_state,
 		  LinkStreamNextFunc *link_stream_next,
-		  LinkStreamResetFunc *link_stream_reset);
+		  LinkStreamResetFunc *link_stream_reset,
+                  float precision);
 
 #endif // _PAGE_RANK_H

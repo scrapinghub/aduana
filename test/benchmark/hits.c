@@ -8,7 +8,7 @@
 #include "lz4_link_stream.h"
 #include "hits.h"
 
-int 
+int
 main(int argc, char **argv) {
      if (argc != 2) {
 	  printf("Usage: hits path_to_lz4_links\n");
@@ -23,24 +23,34 @@ main(int argc, char **argv) {
 	  data[i] = lock[i] = test_dir[i];
 
      Hits *hits;
-     if (hits_new(&hits, test_dir, 1000000) != 0) 
+     if (hits_new(&hits, test_dir, 1000000) != 0)
 	  return -1;
      printf("Initialized HITS\n");
 
      LZ4LinkStream *link_stream;
      if (lz4_link_stream_new(&link_stream, argv[1]) != 0)
 	  return -1;
-	  
+
      clock_t t = clock();
-     if (hits_compute(hits, link_stream, lz4_link_stream_next, lz4_link_stream_reset) != 0)
+     hits->max_loops = 30;
+     switch (hits_compute(hits, link_stream, lz4_link_stream_next, lz4_link_stream_reset, 1e-6)) {
+     case 0:
+	  printf("HITS finished to desired precision\n");
+	  break;
+     case hits_error_precision:
+	  printf("HITS finished after hitting max loops\n");
+	  break;
+     default:
 	  return -1;
+     }
+
      t = clock() - t;
-     printf("HITS loop: %.2f\n", ((float)t)/CLOCKS_PER_SEC/30.0);
+     printf("total time: %.2f\n", ((float)t)/CLOCKS_PER_SEC);
 
 
 #ifdef PRINT_RESULTS
      for (size_t i=0; i<hits->n_pages; ++i) {
-	  printf("% 12zu PR: %.3e %.3e\n", i, 
+	  printf("% 12zu PR: %.3e %.3e\n", i,
 		 *(float*)mmap_array_idx(hits->h1, i),
 		 *(float*)mmap_array_idx(hits->a1, i));
      }

@@ -31,12 +31,21 @@ main(int argc, char **argv) {
      LZ4LinkStream *link_stream;
      if (lz4_link_stream_new(&link_stream, argv[1]) != 0)
 	  return -1;
-	  
+
      clock_t t = clock();
-     if (page_rank_compute(pr, link_stream, lz4_link_stream_next, lz4_link_stream_reset) != 0)
+     pr->max_loops = 30;
+     switch (page_rank_compute(pr, link_stream, lz4_link_stream_next, lz4_link_stream_reset, 1e-6)) {
+     case 0:
+	  printf("PageRank finished to desired precision\n");
+          break;
+     case page_rank_error_precision:
+	  printf("PageRank finished after hitting max loops\n");
+	  break;
+     default:
 	  return -1;
+     }
      t = clock() - t;
-     printf("PageRank loop: %.2f\n", ((float)t)/CLOCKS_PER_SEC/30.0);
+     printf("PageRank total time: %.2f\n", ((float)t)/CLOCKS_PER_SEC);
      
 #ifdef PRINT_RESULTS // Print results 
      for (size_t i=0; i<pr->n_pages; ++i) {
