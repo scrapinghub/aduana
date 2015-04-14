@@ -56,7 +56,7 @@ main(int argc, char **argv) {
      }
 #endif
 
-     hits_delete(hits);
+     hits_delete(hits, 1);
 
      remove(data);
      remove(lock);

@@ -31,9 +31,12 @@ include_directories(
 ############################################################
 add_library(pagedb SHARED
   src/mmap_array.c
-  src/pagedb.c
+  src/page_db.c
   src/hits.c
   src/page_rank.c
+  src/scheduler.c
+  src/bf_scheduler.c
+  src/util.c
 )
 include_directories(src)
 target_link_libraries(pagedb lmdb xxhash)

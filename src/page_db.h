@@ -16,6 +16,10 @@
 #include "lmdb.h"
 #include "xxhash.h"
 
+#include "hits.h"
+#include "link_stream.h"
+#include "page_rank.h"
+
 #define KB 1024LL
 #define MB (1024*KB)
 #define GB (1024*MB
@@ -24,7 +28,7 @@
 /// @{
 /** The information that comes with a link inside a crawled page.
  *
- * The link score is used to decide which links should be crawled next. It 
+ * The link score is used to decide which links should be crawled next. It
  * is application dependent and tipically computed by looking at the link
  * surrounding text.
  */
@@ -58,7 +62,7 @@ typedef struct {
      PageLinks *links;            /**< List of links inside this page */
      double time;                 /**< Number of seconds since epoch */
      float score;                 /**< A number giving an idea of the page content's value */
-     char *content_hash;          /**< A hash to detect content change since last crawl. 
+     char *content_hash;          /**< A hash to detect content change since last crawl.
                                        Arbitrary byte sequence */
      size_t content_hash_length;  /**< Number of byes of the content_hash */
 } CrawledPage;
@@ -86,7 +90,7 @@ crawled_page_delete(CrawledPage *cp);
  *
  * The hash is a new copy
  */
-int 
+int
 crawled_page_set_hash(CrawledPage *cp, const char *hash, size_t hash_length);
 
 /** Set content hash from a 128bit hash */
@@ -160,9 +164,48 @@ typedef struct {
 int
 page_info_print(const PageInfo *pi, char *out);
 
+/** Serialize the PageInfo into a contiguos block of memory.
+ *
+ * @param pi The PageInfo to be serialized
+ * @param val The destination of the serialization
+ *
+ * @return 0 if success, -1 if failure.
+ */
+int
+page_info_dump(const PageInfo *pi, MDB_val *val);
+
+/** Create a new PageInfo loading the information from a previously
+ * dumped PageInfo inside val.
+ *
+ * @return pointer to the new PageInfo or NULL if failure
+ */
+PageInfo *
+page_info_load(const MDB_val *val);
+
+/** Estimate change rate of the given page */
+float
+page_info_rate(const PageInfo *pi);
+
 /** Destroy PageInfo if not NULL, otherwise does nothing */
 void
 page_info_delete(PageInfo *pi);
+
+struct PageInfoList {
+     uint64_t hash;
+     PageInfo *page_info;
+     struct PageInfoList *next;
+};
+typedef struct PageInfoList PageInfoList;
+
+PageInfoList *
+page_info_list_new(PageInfo *pi, uint64_t hash);
+
+PageInfoList *
+page_info_list_cons(PageInfoList *pil, PageInfo *pi, uint64_t hash);
+
+void
+page_info_list_delete(PageInfoList *pil);
+
 /// @}
 
 /// @addtogroup PageDB
@@ -178,10 +221,6 @@ typedef enum {
      page_db_error_no_page       /**< A page was requested but could not be found */
 } PageDBError;
 
-/** Function to call when a PageInfo is modified */
-typedef int (SchedulerAddFunc)(MDB_txn *txn, MDB_val *hash, PageInfo *pi);
-/** Function to call to retrieve a new page */
-typedef int (SchedulerGetFunc)(MDB_txn *txn, MDB_val *hash);
 
 // TODO Make the building of the links database optional. The are many more links
 // that pages and it takes lot of space to store this structure. We should only
@@ -202,19 +241,16 @@ typedef int (SchedulerGetFunc)(MDB_txn *txn, MDB_val *hash);
  *   - links
  *        Maps URL index to links indices. This allows us to make a fast streaming
  *        of all links inside a database.
- *   - schedule
- *        Maps score (float) to hash
  */
 typedef struct {
+     char *path;
      MDB_env *env;
-
-     SchedulerAddFunc *sched_add; /** Callback when a a page is added */
-     SchedulerGetFunc *sched_get; /** Callback to retrieve new requests */
 
      PageDBError error;
      /** A descriptive message associated with @ref error */
      char error_msg[PAGE_DB_MAX_ERROR_LENGTH+1];
 } PageDB;
+
 
 /** Creates a new database and stores data inside path
  *
@@ -252,7 +288,7 @@ page_db_new(PageDB **db, const char *path);
  * @return 0 if success, otherwise the error code
  */
 PageDBError
-page_db_add(PageDB *db, const CrawledPage *page);
+page_db_add(PageDB *db, const CrawledPage *page, PageInfoList **page_info_list);
 
 /** Retrieve the PageInfo stored inside the database.
 
@@ -260,59 +296,56 @@ page_db_add(PageDB *db, const CrawledPage *page);
     NULL
  */
 PageDBError
-page_db_get_info(PageDB *db, const char *url, PageInfo **pi);
+page_db_get_info_from_url(PageDB *db, const char *url, PageInfo **pi);
+
+/** Retrieve the PageInfo stored inside the database.
+
+    Beware that if not found it will signal success but the PageInfo will be
+    NULL
+ */
+PageDBError
+page_db_get_info_from_hash(PageDB *db, uint64_t hash, PageInfo **pi);
 
 /** Get index for the given URL */
 PageDBError
 page_db_get_idx(PageDB *db, const char *url, uint64_t *idx);
 
-/** A request is an array of URLS */
-typedef struct {
-     char **urls;
-     size_t n_urls;
-} PageRequest;
-
-PageRequest*
-page_request_new(size_t n_urls);
-
-void
-page_request_delete(PageRequest *req);
+/** Open a new cursor inside the database */
+int
+page_db_open_cursor(MDB_txn *txn,
+                    const char *db_name,
+                    int flags,
+                    MDB_cursor **cursor,
+                    MDB_cmp_func *func);
 
 int
-page_request_add_url(PageRequest *req, const char *url);
+page_db_open_hash2info(MDB_txn *txn, MDB_cursor **cursor);
 
-/** Retrieve an array of the next pages that should be crawled,
-    according to the scheduler.
+int
+page_db_open_hash2idx(MDB_txn *txn, MDB_cursor **cursor);
 
-    @param db The database
-    @param n_pages The maximum number of pages
-    @param req
- */
-PageDBError
-page_db_request(PageDB *db, size_t n_pages, PageRequest **request);
+int
+page_db_open_links(MDB_txn *txn, MDB_cursor **cursor);
+
+int
+page_db_open_info(MDB_txn *txn, MDB_cursor **cursor);
 
 /** Close database */
 void
 page_db_delete(PageDB *db);
+
+/** Compute, or update, the HITS scores */
+PageDBError
+page_db_update_hits(PageDB *db);
+
+/** Compute, or update, the PageRank scores */
+PageDBError
+page_db_update_page_rank(PageDB *db);
 /// @}
 
 /// @addtogroup LinkStream
 /// @{
 
-typedef struct {
-     int64_t from;
-     int64_t to;
-} Link;
-
-typedef enum {
-     link_stream_state_init, /**< Stream ready */
-     link_stream_state_next, /**< A new element has been obtained */
-     link_stream_state_end,  /**< No more elements */
-     link_stream_state_error /**< Unexpected error */
-} LinkStreamState;
-
-typedef LinkStreamState (LinkStreamNextFunc)(void *state, Link *link);
-typedef LinkStreamState (LinkStreamResetFunc)(void *state);
 
 typedef struct {
      MDB_cursor *cur; /**< Cursor to the links database */
@@ -349,10 +382,8 @@ page_db_link_stream_next(void *es, Link *link);
 /** Delete link stream and free any transaction hold inside the database. */
 void
 page_db_link_stream_delete(PageDBLinkStream *es);
-/// @}
 
-char *
-build_path(const char *path, const char *fname);
+/// @}
 
 #if (defined TEST) && TEST
 #include "CuTest.h"

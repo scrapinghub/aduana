@@ -1,12 +1,14 @@
 #include "CuTest.h"
 
-#include "pagedb.h"
+#include "page_db.h"
+#include "bf_scheduler.h"
 
 int main(void) {
      CuString *output = CuStringNew();
      CuSuite *suite = CuSuiteNew();
      
      CuSuiteAddSuite(suite, test_page_db_suite());
+     CuSuiteAddSuite(suite, test_bf_scheduler_suite());
      
      CuSuiteRun(suite);
 

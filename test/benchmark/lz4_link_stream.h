@@ -5,7 +5,7 @@
 #include <stdio.h>
 #include <lz4frame.h>
 
-#include "pagedb.h"
+#include "page_db.h"
 
 #define LZ4_LINK_STREAM_MAX_ERROR_LENGTH 10000
 

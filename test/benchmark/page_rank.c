@@ -53,7 +53,7 @@ main(int argc, char **argv) {
      }
 #endif
 
-     page_rank_delete(pr);
+     page_rank_delete(pr, 1);
 
      remove(data);
      remove(lock);

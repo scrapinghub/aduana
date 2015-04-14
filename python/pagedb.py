@@ -124,23 +124,15 @@ c_page_db.page_db_new.argtypes = [
 c_page_db.page_db_new.restype = ct.c_int
 c_page_db.page_db_delete.argtypes = [ct.POINTER(c_PageDB)]
 c_page_db.page_db_delete.restype = None
-c_page_db.page_db_add.argtypes = [
-    ct.POINTER(c_PageDB),
-    ct.POINTER(c_CrawledPage)
-]
-c_page_db.page_db_add.restype = ct.c_int
-c_page_db.page_db_get_info.argtypes = [
+
+c_page_db.page_db_get_info_from_url.argtypes = [
     ct.POINTER(c_PageDB),
     ct.c_char_p,
     ct.POINTER(ct.POINTER(c_PageInfo))
 ]
-c_page_db.page_db_get_info.restype = ct.c_int
-c_page_db.page_db_request.argtypes = [
-    ct.POINTER(c_PageDB),
-    ct.c_size_t,
-    ct.POINTER(ct.POINTER(c_PageRequest))
-]
+c_page_db.page_db_get_info_from_url.restype = ct.c_int
 
+import pdb
 class PageDB(object):
     def __init__(self, path):
         # save to make sure lib is available at destruction time
@@ -151,34 +143,6 @@ class PageDB(object):
     def __del__(self):
         self._c.page_db_delete(self._db)
 
-    def add(self, crawled_page):
-        self._c.page_db_add(self._db, crawled_page._cp)
-
-    def request(self, n_pages):
-        req = ct.POINTER(c_PageRequest)()
-        rc = self._c.page_db_request(
-            self._db,
-            n_pages,
-            ct.byref(req))
-        if rc != 0:
-            return []
-
-        reqs = []
-        for i in xrange(req.contents.n_urls):
-            if not req.contents.urls[i]:
-                break
-            reqs.append(req.contents.urls[i])
-        self._c.page_request_delete(req)
-
-        return reqs
-
 if __name__ == '__main__':
     db = PageDB("./test_python_bindings")
-    db.add(CrawledPage("bar", [("x", 1.0), ("y", 0.4)]))
-    db.add(CrawledPage("foo", [("a", 1.0), ("b", 0.5)]))
-    db.add(CrawledPage("a"))
-
-    print "Expected:", ["x", "b", "y"]
-    print "  Actual:", db.request(10)
-
     shutil.rmtree("./test_python_bindings")
