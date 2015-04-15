@@ -24,10 +24,7 @@ typedef struct {
 
      size_t n_pages;
 
-     HitsError error; /**< Last error */
-     /** A message with a meaningful description of the error */
-     char error_msg[HITS_MAX_ERROR_LENGTH+1];
-
+     Error error;
      /** If greater than 0 stop computation even if precision was not achieved */
      size_t max_loops;
 } Hits;

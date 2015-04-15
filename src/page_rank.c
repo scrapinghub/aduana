@@ -22,24 +22,14 @@
 #include "util.h"
 
 static void
-page_rank_set_error(PageRank *pr, int error, const char *msg) {
-     pr->error = error;
-     strncpy(pr->error_msg, msg, PAGE_RANK_MAX_ERROR_LENGTH);
+page_rank_set_error(PageRank *pr, int code, const char *message) {
+     error_set(&pr->error, code, message);
+     
 }
 
 static void
-page_rank_add_error_aux(PageRank *pr, const char *msg) {
-     (void)strncat(
-          pr->error_msg,
-          msg,
-          PAGE_RANK_MAX_ERROR_LENGTH -
-               strnlen(pr->error_msg, PAGE_RANK_MAX_ERROR_LENGTH));
-}
-
-static void
-page_rank_add_error(PageRank *pr, const char *msg) {
-    page_rank_add_error_aux(pr, ": ");
-    page_rank_add_error_aux(pr, msg);
+page_rank_add_error(PageRank *pr, const char *message) {
+     error_add(&pr->error, message);
 }
 
 PageRankError
@@ -63,23 +53,23 @@ page_rank_new(PageRank **pr, const char *path, size_t max_vertices, float dampin
      }
      if (mmap_array_new(&p->out_degree, p->path_out_degree, max_vertices, sizeof(float)) != 0) {
           error1 = "building out_degree mmap array";
-          error2 = p->out_degree? p->out_degree->error_msg: "NULL";
+          error2 = p->out_degree? p->out_degree->error.message: "NULL";
           goto on_error;
      }
      if (mmap_array_new(&p->value1, p->path_pr, max_vertices, sizeof(float)) != 0) {
           error1 = "building value1 mmap array";
-          error2 = p->value1? p->value1->error_msg: "NULL";
+          error2 = p->value1? p->value1->error.message: "NULL";
           goto on_error;
      }
      if (mmap_array_new(&p->value2, 0, max_vertices, sizeof(float)) != 0) {
           error1 = "building value2 mmap array";
-          error2 = p->value2? p->value2->error_msg: "NULL";
+          error2 = p->value2? p->value2->error.message: "NULL";
           goto on_error;
      }
 
      if (mmap_array_advise(p->value1, MADV_SEQUENTIAL) != 0) {
           error1 = "value1";
-          error2 = p->value1->error_msg;
+          error2 = p->value1->error.message;
           goto on_error;
      }
 
@@ -88,13 +78,13 @@ page_rank_new(PageRank **pr, const char *path, size_t max_vertices, float dampin
      for (size_t i=0; i<p->value1->n_elements; ++i)
           if (mmap_array_set(p->value1, i, &v0) != 0) {
                error1 = "value1";
-               error2 = p->value1->error_msg;
+               error2 = p->value1->error.message;
                goto on_error;
           }
 
      if (mmap_array_advise(p->value1, MADV_DONTNEED) != 0) {
           error1 = "value1";
-          error2 = p->value1->error_msg;
+          error2 = p->value1->error.message;
           goto on_error;
      }
 
@@ -102,11 +92,9 @@ page_rank_new(PageRank **pr, const char *path, size_t max_vertices, float dampin
 
 on_error:
      page_rank_set_error(p, page_rank_error_internal, __func__);
-     if (error1 != 0)
-          page_rank_add_error(p, error1);
-     if (error2 != 0)
-          page_rank_add_error(p, error2);
-     return p->error;
+     page_rank_add_error(p, error1);
+     page_rank_add_error(p, error2);
+     return p->error.code;
 }
 
 PageRankError
@@ -119,13 +107,13 @@ page_rank_delete(PageRank *pr, int delete_files) {
 
      if (mmap_array_delete(pr->out_degree) != 0) {
           error1 = "deleting out_degree";
-          error2 = pr->out_degree->error_msg;
+          error2 = pr->out_degree->error.message;
      } else if (mmap_array_delete(pr->value1) != 0) {
           error1 = "deleting value1";
-          error2 = pr->value1->error_msg;
+          error2 = pr->value1->error.message;
      } else if (mmap_array_delete(pr->value2) != 0) {
           error1 = "deleting value2";
-          error2 = pr->value2->error_msg;
+          error2 = pr->value2->error.message;
      } else if (delete_files && (remove(pr->path_out_degree) != 0)) {
           error1 = "deleting out_degree file";
           error2 = strerror(errno);
@@ -139,11 +127,9 @@ page_rank_delete(PageRank *pr, int delete_files) {
           return 0;
      }
      page_rank_set_error(pr, page_rank_error_internal, __func__);
-     if (error1 != 0)
-          page_rank_add_error(pr, error1);
-     if (error2 != 0)
-          page_rank_add_error(pr, error2);
-     return pr->error;
+     page_rank_add_error(pr, error1);
+     page_rank_add_error(pr, error2);
+     return pr->error.code;
 }
 
 static PageRankError
@@ -153,22 +139,20 @@ page_rank_expand(PageRank *pr) {
 
      if (mmap_array_resize(pr->out_degree, 2*pr->out_degree->n_elements) != 0) {
           error1 = "resizing out_degree";
-          error2 = pr->out_degree->error_msg;
+          error2 = pr->out_degree->error.message;
      } else if (mmap_array_resize(pr->value1, 2*pr->value1->n_elements) != 0) {
           error1 = "resizing value1";
-          error2 = pr->value1->error_msg;
+          error2 = pr->value1->error.message;
      } else if (mmap_array_resize(pr->value2, 2*pr->value2->n_elements) != 0) {
           error1 = "resizing value2";
-          error2 = pr->value2->error_msg;
+          error2 = pr->value2->error.message;
      } else {
           return 0;
      }
      page_rank_set_error(pr, page_rank_error_internal, __func__);
-     if (error1 != 0)
-          page_rank_add_error(pr, error1);
-     if (error2 != 0)
-          page_rank_add_error(pr, error2);
-     return pr->error;
+     page_rank_add_error(pr, error1);
+     page_rank_add_error(pr, error2);
+     return pr->error.code;
 }
 
 PageRankError
@@ -191,7 +175,7 @@ page_rank_init(PageRank *pr,
 
      if (mmap_array_advise(pr->out_degree, MADV_SEQUENTIAL) != 0) {
           error1 = "advising out_degree on sequential access";
-          error2 = pr->out_degree->error_msg;
+          error2 = pr->out_degree->error.message;
           goto on_error;
      }
      mmap_array_zero(pr->out_degree);
@@ -225,7 +209,7 @@ page_rank_init(PageRank *pr,
      // Since its possible that the number of pages has changed, renormalize
      if (mmap_array_advise(pr->value1, MADV_SEQUENTIAL) != 0) {
           error1 = "advising out_degree on sequential access";
-          error2 = pr->value1->error_msg;
+          error2 = pr->value1->error.message;
           goto on_error;
      }
      float sum = 0.0;
@@ -241,11 +225,9 @@ page_rank_init(PageRank *pr,
 
 on_error:
      page_rank_set_error(pr, page_rank_error_internal, __func__);
-     if (error1 != 0)
-          page_rank_add_error(pr, error1);
-     if (error2 != 0)
-          page_rank_add_error(pr, error2);
-     return pr->error;
+     page_rank_add_error(pr, error1);
+     page_rank_add_error(pr, error2);
+     return pr->error.code;
 }
 
 static PageRankError
@@ -258,24 +240,24 @@ page_rank_loop(PageRank *pr,
      // Clear value2 scores
      if (mmap_array_advise(pr->value2, MADV_SEQUENTIAL) != 0) {
           error1 = "advising value2 on sequential access";
-          error2 = pr->value2->error_msg;
+          error2 = pr->value2->error.message;
           goto on_error;
      }
      mmap_array_zero(pr->value2);
 
      if (mmap_array_advise(pr->value1, MADV_SEQUENTIAL) != 0) {
           error1 = "value1";
-          error2 = pr->value1->error_msg;
+          error2 = pr->value1->error.message;
           goto on_error;
      }
      if (mmap_array_advise(pr->out_degree, MADV_SEQUENTIAL) != 0) {
           error1 = "out_degree";
-          error2 = pr->out_degree->error_msg;
+          error2 = pr->out_degree->error.message;
           goto on_error;
      }
      if (mmap_array_advise(pr->value2, MADV_RANDOM) != 0) {
           error1 = "value2";
-          error2 = pr->value2->error_msg;
+          error2 = pr->value2->error.message;
           goto on_error;
      }
      Link link;
@@ -307,11 +289,9 @@ page_rank_loop(PageRank *pr,
 
 on_error:
      page_rank_set_error(pr, page_rank_error_internal, __func__);
-     if (error1 != 0)
-          page_rank_add_error(pr, error1);
-     if (error2 != 0)
-          page_rank_add_error(pr, error2);
-     return pr->error;
+     page_rank_add_error(pr, error1);
+     page_rank_add_error(pr, error2);
+     return pr->error.code;
 }
 
 static PageRankError
@@ -324,7 +304,7 @@ page_rank_end_loop(PageRank *pr, float *delta) {
 
      if (mmap_array_advise(pr->value2, MADV_SEQUENTIAL) != 0) {
           error1 = "value2";
-          error2 = pr->value2->error_msg;
+          error2 = pr->value2->error.message;
           goto on_error;
      }
 
@@ -356,11 +336,9 @@ page_rank_end_loop(PageRank *pr, float *delta) {
      return 0;
 on_error:
      page_rank_set_error(pr, page_rank_error_internal, __func__);
-     if (error1 != 0)
-          page_rank_add_error(pr, error1);
-     if (error2 != 0)
-          page_rank_add_error(pr, error2);
-     return pr->error;
+     page_rank_add_error(pr, error1);
+     page_rank_add_error(pr, error2);
+     return pr->error.code;
 }
 
 PageRankError

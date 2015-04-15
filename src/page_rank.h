@@ -24,9 +24,7 @@ typedef struct {
      char *path_out_degree;
      char *path_pr;
 
-     PageRankError error; /**< Last error */
-     /** A message with a meaningful description of the error */
-     char error_msg[PAGE_RANK_MAX_ERROR_LENGTH+1];
+     Error error;
 
      /** If greater than 0 stop computation even if precision was not achieved */
      size_t max_loops;

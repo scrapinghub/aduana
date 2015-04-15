@@ -1,6 +1,9 @@
 #ifndef _MMAP_ARRAY_H
 #define _MMAP_ARRAY_H
 
+#include <stdlib.h>
+#include "util.h"
+
 #define MMAP_ARRAY_MAX_ERROR_LENGTH 10000
 
 typedef enum {
@@ -20,9 +23,7 @@ typedef struct {
      size_t n_elements;    /**< Number of elements */
      size_t element_size;  /**< Size of each element */
 
-     MMapArrayError error; /**< Last error */
-     /** A message with a meaningful description of the error */
-     char error_msg[MMAP_ARRAY_MAX_ERROR_LENGTH+1];
+     Error error;
 } MMapArray;
 
 /** Create a new MMapArray

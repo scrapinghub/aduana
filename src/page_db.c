@@ -413,24 +413,13 @@ page_db_open_info(MDB_txn *txn, MDB_cursor **cursor) {
 
 
 static void
-page_db_set_error(PageDB *db, int error, const char *msg) {
-     db->error = error;
-     strncpy(db->error_msg, msg, PAGE_DB_MAX_ERROR_LENGTH);
+page_db_set_error(PageDB *db, int code, const char *message) {
+     error_set(&db->error, code, message);
 }
 
 static void
-page_db_add_error_aux(PageDB *db, const char *msg) {
-     (void)strncat(
-          db->error_msg,
-          msg,
-          PAGE_DB_MAX_ERROR_LENGTH -
-               strnlen(db->error_msg, PAGE_DB_MAX_ERROR_LENGTH));
-}
-
-static void
-page_db_add_error(PageDB *db, const char *msg) {
-    page_db_add_error_aux(db, ": ");
-    page_db_add_error_aux(db, msg);
+page_db_add_error(PageDB *db, const char *message) {
+     error_add(&db->error, message);
 }
 
 /** Doubles database size.
@@ -448,7 +437,7 @@ page_db_grow(PageDB *db) {
           page_db_set_error(db, page_db_error_internal, __func__);
           page_db_add_error(db, mdb_strerror(mdb_rc));
      }
-     return db->error;
+     return db->error.code;
 }
 
 PageDBError
@@ -466,7 +455,7 @@ page_db_new(PageDB **db, const char *path) {
      if (error != 0) {
           page_db_set_error(p, page_db_error_invalid_path, __func__);
           page_db_add_error(p, error);
-          return p->error;
+          return p->error.code;
      }
 
      // initialize LMDB on the directory
@@ -517,7 +506,7 @@ page_db_new(PageDB **db, const char *path) {
           mdb_env_close(p->env);
      }
 
-     return p->error;
+     return p->error.code;
 }
 
 
@@ -734,7 +723,7 @@ txn_start: // return here if the transaction is discarded and must be repeated
           goto on_error;
      }
 
-     return db->error;
+     return db->error.code;
 on_error:
      if (!failed) { // allow one failure
           mdb_txn_abort(txn);
@@ -743,12 +732,11 @@ on_error:
           goto txn_start;
      } else {
           page_db_set_error(db, page_db_error_internal, __func__);
-          if (error != 0)
-               page_db_add_error(db, error);
+          page_db_add_error(db, error);
           if (mdb_rc != 0)
                page_db_add_error(db, mdb_strerror(mdb_rc));
 
-          return db->error;
+          return db->error.code;
      }
 }
 
@@ -796,12 +784,11 @@ page_db_get_info_from_hash(PageDB *db, uint64_t hash, PageInfo **pi) {
 on_error:
      mdb_txn_abort(txn);
      page_db_set_error(db, page_db_error_internal, __func__);
-     if (error != 0)
-          page_db_add_error(db, error);
+     page_db_add_error(db, error);
      if (mdb_rc != 0)
           page_db_add_error(db, mdb_strerror(mdb_rc));
 
-     return db->error;
+     return db->error.code;
 }
 
 PageDBError
@@ -849,12 +836,11 @@ on_error:
      if (txn != 0)
           mdb_txn_abort(txn);
      page_db_set_error(db, page_db_error_internal, __func__);
-     if (error != 0)
-          page_db_add_error(db, error);
+     page_db_add_error(db, error);
      if (mdb_rc != 0)
           page_db_add_error(db, mdb_strerror(mdb_rc));
 
-     return db->error;
+     return db->error.code;
 }
 
 /** Close database */
@@ -873,13 +859,13 @@ page_db_update_hits(PageDB *db) {
      if (!db->hits)
           if ((hits_new(&db->hits, db->path, 100000) != 0)) {
                error1 = "creating new HITS instance";
-               error2 = db->hits? db->hits->error_msg: "NULL";
+               error2 = db->hits? db->hits->error.message: "NULL";
                goto on_error;
           }
 
      PageDBLinkStream *st = 0;
      if (page_db_link_stream_new(&st, db) != 0)
-          return db->error;
+          return db->error.code;
 
      if (hits_compute(
               db->hits,
@@ -888,7 +874,7 @@ page_db_update_hits(PageDB *db) {
               page_db_link_stream_reset,
               1e-4) != 0) {
           error1 = "computing HITS scores";
-          error2 = db->hits->error_msg;
+          error2 = db->hits->error.message;
           goto on_error;
      }
      page_db_link_stream_delete(st);
@@ -897,12 +883,10 @@ page_db_update_hits(PageDB *db) {
 on_error:
      page_db_link_stream_delete(st);
      page_db_set_error(db, page_db_error_internal, __func__);
-     if (error1 != 0)
-          page_db_add_error(db, error1);
-     if (error2 != 0)
-          page_db_add_error(db, error2);
+     page_db_add_error(db, error1);
+     page_db_add_error(db, error2);
 
-     return db->error;
+     return db->error.code;
 }
 
 PageDBError
@@ -912,13 +896,13 @@ page_db_update_page_rank(PageDB *db) {
      if (!db->page_rank)
           if ((page_rank_new(&db->page_rank, db->path, 100000, 0.85) != 0)) {
                error1 = "creating new PageRank instance";
-               error2 = db->page_rank? db->page_rank->error_msg: "NULL";
+               error2 = db->page_rank? db->page_rank->error.message: "NULL";
                goto on_error;
           }
 
      PageDBLinkStream *st = 0;
      if (page_db_link_stream_new(&st, db) != 0)
-          return db->error;
+          return db->error.code;
 
      if (page_rank_compute(
               db->page_rank,
@@ -927,7 +911,7 @@ page_db_update_page_rank(PageDB *db) {
               page_db_link_stream_reset,
               1e-4) != 0) {
           error1 = "computing PageRank scores";
-          error2 = db->page_rank->error_msg;
+          error2 = db->page_rank->error.message;
           goto on_error;
      }
      page_db_link_stream_delete(st);
@@ -936,12 +920,10 @@ page_db_update_page_rank(PageDB *db) {
 on_error:
      page_db_link_stream_delete(st);
      page_db_set_error(db, page_db_error_internal, __func__);
-     if (error1 != 0)
-          page_db_add_error(db, error1);
-     if (error2 != 0)
-          page_db_add_error(db, error2);
+     page_db_add_error(db, error1);
+     page_db_add_error(db, error2);
 
-     return db->error;
+     return db->error.code;
 }
 #endif
 /// @}
@@ -1006,16 +988,15 @@ page_db_link_stream_new(PageDBLinkStream **es, PageDB *db) {
           goto mdb_error;
      }
 
-     return db->error;
+     return db->error.code;
 
 mdb_error:
      page_db_set_error(db, page_db_error_internal, __func__);
-     if (error != 0)
-          page_db_add_error(db, error);
+     page_db_add_error(db, error);
      if (mdb_rc != 0)
           page_db_add_error(db, mdb_strerror(mdb_rc));
 
-     return db->error;
+     return db->error.code;
 }
 
 LinkStreamState
@@ -1125,7 +1106,7 @@ test_page_db_simple(CuTest *tc) {
 
      PageDB *db;
      CuAssert(tc,
-              db!=0? db->error_msg: "NULL",
+              db!=0? db->error.message: "NULL",
               page_db_new(&db, test_dir) == 0);
 
      CrawledPage *cp1 = crawled_page_new("www.yahoo.com");
@@ -1143,18 +1124,18 @@ test_page_db_simple(CuTest *tc) {
 
      PageInfoList *pil;
      CuAssert(tc,
-              db->error_msg,
+              db->error.message,
               page_db_add(db, cp1, &pil) == 0);
      page_info_list_delete(pil);
 
      CuAssert(tc,
-              db->error_msg,
+              db->error.message,
               page_db_add(db, cp2, &pil) == 0);
      page_info_list_delete(pil);
 
      crawled_page_set_hash64(cp2, 3000);
      CuAssert(tc,
-              db->error_msg,
+              db->error.message,
               page_db_add(db, cp2, &pil) == 0);
      page_info_list_delete(pil);
 
@@ -1166,7 +1147,7 @@ test_page_db_simple(CuTest *tc) {
      for (size_t i=0; i<3; ++i) {
           PageInfo *pi;
           CuAssert(tc,
-                   db->error_msg,
+                   db->error.message,
                    page_db_get_info_from_url(db, print_pages[i], &pi) == 0);
 
           CuAssertPtrNotNull(tc, pi);
@@ -1199,7 +1180,7 @@ test_page_db_simple(CuTest *tc) {
 
      PageDBLinkStream *es;
      CuAssert(tc,
-              db->error_msg,
+              db->error.message,
               page_db_link_stream_new(&es, db) == 0);
 
      if (es->state == link_stream_state_init) {
@@ -1255,7 +1236,7 @@ test_page_db_large(CuTest *tc) {
 
      PageDB *db;
      CuAssert(tc,
-              db!=0? db->error_msg: "NULL",
+              db!=0? db->error.message: "NULL",
               page_db_new(&db, test_dir) == 0);
 
      const size_t n_links = 10;
@@ -1282,23 +1263,23 @@ test_page_db_large(CuTest *tc) {
 
           PageInfoList *pil;
           CuAssert(tc,
-                   db->error_msg,
+                   db->error.message,
                    page_db_add(db, cp, &pil) == 0);
           page_info_list_delete(pil);
      }
 
      PageDBLinkStream *st;
      CuAssert(tc,
-              db->error_msg,
+              db->error.message,
               page_db_link_stream_new(&st, db) == 0);
 
      Hits *hits;
      CuAssert(tc,
-              hits!=0? hits->error_msg: "NULL",
+              hits!=0? hits->error.message: "NULL",
               hits_new(&hits, test_dir, n_pages) == 0);
 
      CuAssert(tc,
-              hits->error_msg,
+              hits->error.message,
               hits_compute(hits,
                            st,
                            page_db_link_stream_next,
@@ -1306,7 +1287,7 @@ test_page_db_large(CuTest *tc) {
                            1e-8) == 0);
 
      CuAssert(tc,
-              hits->error_msg,
+              hits->error.message,
               hits_delete(hits, 1) == 0);
 
      page_db_link_stream_delete(st);
@@ -1348,7 +1329,7 @@ test_page_db_hits(CuTest *tc) {
 
      PageDB *db;
      CuAssert(tc,
-              db!=0? db->error_msg: "NULL",
+              db!=0? db->error.message: "NULL",
               page_db_new(&db, test_dir) == 0);
 
      char *urls[5] = {"1", "2", "3", "4", "5" };
@@ -1370,7 +1351,7 @@ test_page_db_hits(CuTest *tc) {
 
           PageInfoList *pil;
           CuAssert(tc,
-                   db->error_msg,
+                   db->error.message,
                    page_db_add(db, cp, &pil) == 0);
           page_info_list_delete(pil);
           crawled_page_delete(cp);
@@ -1378,16 +1359,16 @@ test_page_db_hits(CuTest *tc) {
 
      PageDBLinkStream *st;
      CuAssert(tc,
-              db->error_msg,
+              db->error.message,
               page_db_link_stream_new(&st, db) == 0);
 
      Hits *hits;
      CuAssert(tc,
-              hits!=0? hits->error_msg: "NULL",
+              hits!=0? hits->error.message: "NULL",
               hits_new(&hits, test_dir, 5) == 0);
 
      CuAssert(tc,
-              hits->error_msg,
+              hits->error.message,
               hits_compute(hits,
                            st,
                            page_db_link_stream_next,
@@ -1403,7 +1384,7 @@ test_page_db_hits(CuTest *tc) {
 
      for (int i=0; i<5; ++i) {
           CuAssert(tc,
-                   db->error_msg,
+                   db->error.message,
                    page_db_get_idx(db, urls[i], &idx) == 0);
 
           CuAssertPtrNotNull(tc,
@@ -1415,7 +1396,7 @@ test_page_db_hits(CuTest *tc) {
           CuAssertDblEquals(tc, a_scores[i], *a_score, 1e-6);
      }
      CuAssert(tc,
-              hits->error_msg,
+              hits->error.message,
               hits_delete(hits, 1) == 0);
 
      page_db_delete(db);
@@ -1494,7 +1475,7 @@ test_page_db_page_rank(CuTest *tc) {
 
      PageDB *db;
      CuAssert(tc,
-              db!=0? db->error_msg: "NULL",
+              db!=0? db->error.message: "NULL",
               page_db_new(&db, test_dir) == 0);
 
      char *urls[5] = {"1", "2", "3", "4", "5" };
@@ -1516,7 +1497,7 @@ test_page_db_page_rank(CuTest *tc) {
           crawled_page_set_hash64(cp, i);
           PageInfoList *pil;
           CuAssert(tc,
-                   db->error_msg,
+                   db->error.message,
                    page_db_add(db, cp, &pil) == 0);
           page_info_list_delete(pil);
           crawled_page_delete(cp);
@@ -1524,16 +1505,16 @@ test_page_db_page_rank(CuTest *tc) {
 
      PageDBLinkStream *st;
      CuAssert(tc,
-              db->error_msg,
+              db->error.message,
               page_db_link_stream_new(&st, db) == 0);
 
      PageRank *pr;
      CuAssert(tc,
-              pr!=0? pr->error_msg: "NULL",
+              pr!=0? pr->error.message: "NULL",
               page_rank_new(&pr, test_dir, 5, 0.85) == 0);
 
      CuAssert(tc,
-              pr->error_msg,
+              pr->error.message,
               page_rank_compute(pr,
                                 st,
                                 page_db_link_stream_next,
@@ -1547,7 +1528,7 @@ test_page_db_page_rank(CuTest *tc) {
      float scores[5] =  {0.15936255,  0.15936255,  0.15936255,  0.15936255,  0.3625498};
      for (int i=0; i<5; ++i) {
           CuAssert(tc,
-                   db->error_msg,
+                   db->error.message,
                    page_db_get_idx(db, urls[i], &idx) == 0);
 
           CuAssertPtrNotNull(tc,
@@ -1556,7 +1537,7 @@ test_page_db_page_rank(CuTest *tc) {
           CuAssertDblEquals(tc, scores[i], *score, 1e-6);
      }
      CuAssert(tc,
-              pr->error_msg,
+              pr->error.message,
               page_rank_delete(pr, 1) == 0);
 
      page_db_delete(db);

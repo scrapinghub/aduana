@@ -245,10 +245,7 @@ typedef enum {
 typedef struct {
      char *path;
      MDB_env *env;
-
-     PageDBError error;
-     /** A descriptive message associated with @ref error */
-     char error_msg[PAGE_DB_MAX_ERROR_LENGTH+1];
+     Error error;
 } PageDB;
 
 

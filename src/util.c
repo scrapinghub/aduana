@@ -9,6 +9,33 @@
 
 #include "util.h"
 
+void
+error_set(Error* error, int code, const char *message) {
+     if (error) {
+          error->code = code;
+          strncpy(error->message, message? message: "no description", MAX_ERROR_LENGTH);
+     }
+}
+
+static void
+error_add_aux(Error *error, const char *message) {
+     if (error) {
+          (void)strncat(
+               error->message,
+               message,
+               MAX_ERROR_LENGTH -
+               strnlen(error->message, MAX_ERROR_LENGTH));
+     }
+}
+
+void
+error_add(Error* error, const char *message) {
+     if (error && message) {
+          error_add_aux(error, ": ");
+          error_add_aux(error, message);
+     }
+}
+
 char *
 concat(const char *s1, const char *s2, char separator) {
      size_t len1 = strlen(s1);
@@ -26,18 +53,6 @@ concat(const char *s1, const char *s2, char separator) {
 char *
 build_path(const char *path, const char *fname) {
      return concat(path, fname, '/');
-}
-
-// TODO delete?
-/** Print hexadecimal representation of hash.
-
-We assume that out has twice the length of the original hash to
-print the hexadecimal representation.
-*/
-void
-hash_print(char *hash, size_t len, char *out) {
-     for (size_t i=0; i<len; ++i)
-          sprintf(out + 2*i, "%02X", hash[i]);
 }
 
 char *

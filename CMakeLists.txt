@@ -37,6 +37,7 @@ add_library(pagedb SHARED
   src/scheduler.c
   src/bf_scheduler.c
   src/util.c
+  src/page_rank_scorer.c
 )
 include_directories(src)
 target_link_libraries(pagedb lmdb xxhash)

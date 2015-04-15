@@ -20,9 +20,7 @@ typedef struct {
      MDB_env *env;
      char *path;
 
-     BFSchedulerError error;
-     /** A descriptive message associated with @ref error */
-     char error_msg[BF_SCHEDULER_MAX_ERROR_LENGTH+1];
+     Error error;
 } BFScheduler;
 
 

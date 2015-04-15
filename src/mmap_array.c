@@ -14,33 +14,23 @@
 #include <unistd.h>
 
 #include "mmap_array.h"
+#include "util.h"
 
 static void
-mmap_array_set_error(MMapArray *marr, int error, const char *msg) {
-     marr->error = error;
-     strncpy(marr->error_msg, msg, MMAP_ARRAY_MAX_ERROR_LENGTH);
+mmap_array_set_error(MMapArray *marr, int code, const char *message) {
+     error_set(&marr->error, code, message);
 }
 
 static void
-mmap_array_add_error_aux(MMapArray *marr, const char *msg) {
-     (void)strncat(
-	  marr->error_msg,
-	  msg,
-	  MMAP_ARRAY_MAX_ERROR_LENGTH -
-	       strnlen(marr->error_msg, MMAP_ARRAY_MAX_ERROR_LENGTH));
-}
-
-static void
-mmap_array_add_error(MMapArray *marr, const char *msg) {
-    mmap_array_add_error_aux(marr, ": ");
-    mmap_array_add_error_aux(marr, msg);
+mmap_array_add_error(MMapArray *marr, const char *message) {
+     error_add(&marr->error, message);
 }
 
 static void
 mmap_array_set_error_out_of_bounds(MMapArray *marr, size_t n) {
-     marr->error = mmap_array_error_out_of_bounds;
+     marr->error.code = mmap_array_error_out_of_bounds;
      if (snprintf(
-	      marr->error_msg,
+	      marr->error.message,
 	      MMAP_ARRAY_MAX_ERROR_LENGTH,
 	      "Out of bounds error: %zu (max: %zu)",
 	      n,
@@ -76,14 +66,14 @@ mmap_array_new(MMapArray **marr,
 	  mmap_flags = MAP_PRIVATE | MAP_ANONYMOUS;
      } else {
 	  if ((p->fd = open(path, O_CREAT | O_RDWR, S_IREAD | S_IWRITE)) == -1) {
-	       p->error = mmap_array_error_file;
+	       p->error.code = mmap_array_error_file;
 	       errno_cp = errno;
 	       error = "could not open path";
 	       goto on_error;
 	  }
 	  mmap_flags = MAP_SHARED;
 	  if (ftruncate(p->fd, n_elements*element_size) != 0) {
-	       p->error = mmap_array_error_file;
+	       p->error.code = mmap_array_error_file;
 	       errno_cp = errno;
 	       error = "file truncation failed";
 	       goto on_error;
@@ -93,7 +83,7 @@ mmap_array_new(MMapArray **marr,
      p->mem = mmap(
 	  0, n_elements*element_size, PROT_READ | PROT_WRITE, mmap_flags, p->fd, 0);
      if (p->mem == MAP_FAILED) {
-	  p->error = mmap_array_error_mmap;
+	  p->error.code = mmap_array_error_mmap;
 	  errno_cp = errno;
 	  error = "initializing mmap";
 	  goto on_error;
@@ -101,12 +91,12 @@ mmap_array_new(MMapArray **marr,
 
      return 0;
 on_error:
-     mmap_array_set_error(p, p->error, __func__);
+     mmap_array_set_error(p, p->error.code, __func__);
      if (error != 0)
 	  mmap_array_add_error(p, error);
      if (errno_cp != 0)
 	  mmap_array_add_error(p, strerror(errno_cp));
-     return p->error;
+     return p->error.code;
 }
 
 MMapArrayError
@@ -115,7 +105,7 @@ mmap_array_advise(MMapArray *marr, int flag) {
 	  int errno_cp = errno;
 	  mmap_array_set_error(marr, mmap_array_error_mmap, __func__);
 	  mmap_array_add_error(marr, strerror(errno_cp));
-	  return marr->error;
+	  return marr->error.code;
      }
      return 0;
 }
@@ -127,7 +117,7 @@ mmap_array_sync(MMapArray *marr, int flag) {
 	  mmap_array_set_error(marr, mmap_array_error_mmap, __func__);
 	  mmap_array_add_error(marr, strerror(errno_cp));
      }
-     return marr->error;
+     return marr->error.code;
 }
 
 void *
@@ -149,7 +139,7 @@ mmap_array_set(MMapArray *marr, size_t n, const void *x) {
 	  for (size_t i=0; i<marr->element_size; ++i)
 	       b[i] = a[i];
 
-     return marr->error;
+     return marr->error.code;
 }
 
 void
@@ -181,7 +171,7 @@ on_error:
 	  mmap_array_add_error(marr, error);
      if (errno_cp != 0)
 	  mmap_array_add_error(marr, strerror(errno_cp));
-     return marr->error;
+     return marr->error.code;
 }
 
 MMapArrayError
@@ -193,14 +183,14 @@ mmap_array_resize(MMapArray *marr, size_t n_elements) {
      char *error = 0;
 
      if (marr->fd != -1 && ftruncate(marr->fd, new_size) !=0) {
-	  marr->error = mmap_array_error_file;
+	  marr->error.code = mmap_array_error_file;
 	  errno_cp = errno;
 	  error = "resizing file";
 	  goto on_error;
      }
      marr->mem = mremap(marr->mem, old_size, new_size, MREMAP_MAYMOVE);
      if (marr->mem == MAP_FAILED) {
-	  marr->error = mmap_array_error_mmap;
+	  marr->error.code = mmap_array_error_mmap;
 	  errno_cp = errno;
 	  error = "resizing mmap";
 	  goto on_error;
@@ -210,10 +200,9 @@ mmap_array_resize(MMapArray *marr, size_t n_elements) {
      return 0;
 
 on_error:
-     mmap_array_set_error(marr, marr->error, __func__);
-     if (error != 0)
-	  mmap_array_add_error(marr, error);
+     mmap_array_set_error(marr, marr->error.code, __func__);
+     mmap_array_add_error(marr, error);
      if (errno_cp != 0)
 	  mmap_array_add_error(marr, strerror(errno_cp));
-     return marr->error;
+     return marr->error.code;
 }

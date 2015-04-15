@@ -20,24 +20,13 @@
 
 
 static void
-bf_scheduler_set_error(BFScheduler *sch, int error, const char *msg) {
-     sch->error = error;
-     strncpy(sch->error_msg, msg, BF_SCHEDULER_MAX_ERROR_LENGTH);
+bf_scheduler_set_error(BFScheduler *sch, int code, const char *message) {
+     error_set(&sch->error, code, message);
 }
 
 static void
-bf_scheduler_add_error_aux(BFScheduler *sch, const char *msg) {
-     (void)strncat(
-          sch->error_msg,
-          msg,
-          BF_SCHEDULER_MAX_ERROR_LENGTH -
-               strnlen(sch->error_msg, BF_SCHEDULER_MAX_ERROR_LENGTH));
-}
-
-static void
-bf_scheduler_add_error(BFScheduler *sch, const char *msg) {
-    bf_scheduler_add_error_aux(sch, ": ");
-    bf_scheduler_add_error_aux(sch, msg);
+bf_scheduler_add_error(BFScheduler *sch, const char *message) {
+     error_add(&sch->error, message);
 }
 
 /** Doubles database size.
@@ -55,7 +44,7 @@ bf_scheduler_grow(BFScheduler *sch) {
           bf_scheduler_set_error(sch, bf_scheduler_error_internal, __func__);
           bf_scheduler_add_error(sch, mdb_strerror(mdb_rc));
      }
-     return sch->error;
+     return sch->error.code;
 }
 
 
@@ -85,7 +74,7 @@ bf_scheduler_new(BFScheduler **sch, PageDB *db) {
      if (error != 0) {
           bf_scheduler_set_error(p, bf_scheduler_error_invalid_path, __func__);
           bf_scheduler_add_error(p, error);
-          return p->error;
+          return p->error.code;
      }
 
      // initialize LMDB on the directory
@@ -106,14 +95,14 @@ bf_scheduler_new(BFScheduler **sch, PageDB *db) {
           bf_scheduler_set_error(p, bf_scheduler_error_internal, __func__);
           bf_scheduler_add_error(p, error);
           bf_scheduler_add_error(p, mdb_strerror(mdb_rc));
-          return p->error;
+          return p->error.code;
      }
 
      return 0;
 }
 
 static int
-bf_scheduler_open_cursor(MDB_txn *txn,MDB_cursor **cursor) {
+bf_scheduler_open_cursor(MDB_txn *txn, MDB_cursor **cursor) {
      MDB_dbi dbi;
      int mdb_rc =
           mdb_dbi_open(txn, "schedule", MDB_CREATE | MDB_DUPSORT, &dbi) ||
@@ -134,7 +123,7 @@ bf_scheduler_add(BFScheduler *sch, const CrawledPage *page) {
      PageInfoList *pil;
      if (page_db_add(sch->page_db, page, &pil) != 0) {
           error1 = "adding crawled page";
-          error2 = sch->page_db->error_msg;
+          error2 = sch->page_db->error.message;
           goto on_error;
      }
 
@@ -201,11 +190,9 @@ on_error:
      }
 
      bf_scheduler_set_error(sch, bf_scheduler_error_internal, __func__);
-     if (error1 != 0)
-          bf_scheduler_add_error(sch, error1);
-     if (error2 != 0)
-          bf_scheduler_add_error(sch, error2);
-     return sch->error;
+     bf_scheduler_add_error(sch, error1);
+     bf_scheduler_add_error(sch, error2);
+     return sch->error.code;
 }
 
 BFSchedulerError
@@ -243,7 +230,7 @@ bf_scheduler_request(BFScheduler *sch, size_t n_pages, PageRequest **request) {
                     break;
                default:
                     error1 = "retrieving PageInfo from PageDB";
-                    error2 = sch->page_db->error_msg;
+                    error2 = sch->page_db->error.message;
                     goto on_error;
                     break;
                }
@@ -273,12 +260,10 @@ all_pages_retrieved:
 
 on_error:
      bf_scheduler_set_error(sch, bf_scheduler_error_internal, __func__);
-     if (error1 != 0)
-          bf_scheduler_add_error(sch, error1);
-     if (error2 != 0)
-          bf_scheduler_add_error(sch, error2);
+     bf_scheduler_add_error(sch, error1);
+     bf_scheduler_add_error(sch, error2);
 
-     return sch->error;
+     return sch->error.code;
 }
 
 /** Close scheduler */
@@ -302,12 +287,12 @@ test_bf_scheduler_requests(CuTest *tc) {
 
      PageDB *db;
      CuAssert(tc,
-              db!=0? db->error_msg: "NULL",
+              db!=0? db->error.message: "NULL",
               page_db_new(&db, test_dir_db) == 0);
 
      BFScheduler *sch;
      CuAssert(tc,
-              sch != 0? sch->error_msg: "NULL",
+              sch != 0? sch->error.message: "NULL",
               bf_scheduler_new(&sch, db) == 0);
 
      char *test_dir_sch = sch->path;
@@ -373,7 +358,7 @@ test_bf_scheduler_requests(CuTest *tc) {
       */
      for (size_t i=0; i<n_pages; ++i) {
           CuAssert(tc,
-                   sch->error_msg,
+                   sch->error.message,
                    bf_scheduler_add(sch, crawl[i]) == 0);
           crawled_page_delete(crawl[i]);
      }
@@ -389,7 +374,7 @@ test_bf_scheduler_requests(CuTest *tc) {
       */
      PageRequest *req;
      CuAssert(tc,
-              sch->error_msg,
+              sch->error.message,
               bf_scheduler_request(sch, 2, &req) == 0);
 
      CuAssertStrEquals(tc, "9", req->urls[0]);
@@ -397,7 +382,7 @@ test_bf_scheduler_requests(CuTest *tc) {
      page_request_delete(req);
 
      CuAssert(tc,
-              sch->error_msg,
+              sch->error.message,
               bf_scheduler_request(sch, 4, &req) == 0);
 
      CuAssertStrEquals(tc, "6", req->urls[0]);
