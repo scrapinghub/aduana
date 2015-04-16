@@ -167,7 +167,7 @@ page_rank_set_n_pages(PageRank *pr, size_t n_pages) {
 // 2. Compute the out degree
 static PageRankError
 page_rank_init(PageRank *pr,
-               void *link_stream_state,
+               void *stream_state,
                LinkStreamNextFunc *link_stream_next) {
 
      char *error1 = 0;
@@ -183,15 +183,15 @@ page_rank_init(PageRank *pr,
      Link link;
      int end_stream = 0;
      do {
-          switch(link_stream_next(link_stream_state, &link)) {
-          case link_stream_state_init:
+          switch(link_stream_next(stream_state, &link)) {
+          case stream_state_init:
                break;
-          case link_stream_state_error:
+          case stream_state_error:
                return page_rank_error_internal;
-          case link_stream_state_end:
+          case stream_state_end:
                end_stream = 1;
                break;
-          case link_stream_state_next:
+          case stream_state_next:
                if (link.from >= (int64_t)pr->n_pages)
                     if (page_rank_set_n_pages(pr, link.from + 1) != 0)
                          return page_rank_error_internal;
@@ -232,7 +232,7 @@ on_error:
 
 static PageRankError
 page_rank_loop(PageRank *pr,
-               void *link_stream_state,
+               void *stream_state,
                LinkStreamNextFunc *link_stream_next) {
      char *error1 = 0;
      char *error2 = 0;
@@ -266,15 +266,15 @@ page_rank_loop(PageRank *pr,
      float *value2;
      float *degree;
      do {
-          switch(link_stream_next(link_stream_state, &link)) {
-          case link_stream_state_init:
+          switch(link_stream_next(stream_state, &link)) {
+          case stream_state_init:
                break;
-          case link_stream_state_error:
+          case stream_state_error:
                return page_rank_error_internal;
-          case link_stream_state_end:
+          case stream_state_end:
                end_stream = 1;
                break;
-          case link_stream_state_next:
+          case stream_state_next:
                degree = mmap_array_idx(pr->out_degree, link.from);
                value1 = mmap_array_idx(pr->value1, link.from);
                value2 = mmap_array_idx(pr->value2, link.to);
@@ -331,7 +331,11 @@ page_rank_end_loop(PageRank *pr, float *delta) {
           float diff = fabs(*score2 - *score1);
           if (diff > *delta)
                *delta = diff;
+          // swap scores, we want to retain the old score because it's needed
+          // to stream over scores updates
+          float tmp = *score1;
           *score1 = *score2;
+          *score2 = tmp;
      }
      return 0;
 on_error:
@@ -343,25 +347,25 @@ on_error:
 
 PageRankError
 page_rank_compute(PageRank *pr,
-                  void *link_stream_state,
+                  void *stream_state,
                   LinkStreamNextFunc *link_stream_next,
                   LinkStreamResetFunc *link_stream_reset,
                   float precision) {
 
      PageRankError rc = 0;
 
-     if ((rc = page_rank_init(pr, link_stream_state, link_stream_next)) != 0)
+     if ((rc = page_rank_init(pr, stream_state, link_stream_next)) != 0)
           return rc;
-     if (link_stream_reset(link_stream_state) != 0)
+     if (link_stream_reset(stream_state) != 0)
           return page_rank_error_internal;
 
      float delta = precision + 1.0;
      size_t n_loops = 0;
      while (delta > precision) {
-          rc = page_rank_loop(pr, link_stream_state, link_stream_next);
+          rc = page_rank_loop(pr, stream_state, link_stream_next);
           if (rc != 0)
                return rc;
-          if (link_stream_reset(link_stream_state) == link_stream_state_error)
+          if (link_stream_reset(stream_state) == stream_state_error)
                return page_rank_error_internal;
           rc = page_rank_end_loop(pr, &delta);
           if (rc != 0)
@@ -372,5 +376,16 @@ page_rank_compute(PageRank *pr,
                return page_rank_error_precision;
      }
 
+     return 0;
+}
+
+PageRankError
+page_rank_get(const PageRank *pr, size_t idx, float *score_old, float *score_new) {     
+     float *pr_score_new = mmap_array_idx(pr->value1, idx);
+     float *pr_score_old = mmap_array_idx(pr->value2, idx);
+     if (!pr_score_new || !pr_score_old)
+          return page_rank_error_internal;
+     *score_new = *pr_score_new;
+     *score_old = *pr_score_old;
      return 0;
 }

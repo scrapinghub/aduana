@@ -372,6 +372,12 @@ page_info_list_delete(PageInfoList *pil) {
  */
 static char info_n_pages[] = "n_pages";
 
+
+uint64_t 
+page_db_hash(const char *url) {
+     return XXH64(url, strlen(url), 0);
+}
+
 int
 page_db_open_cursor(MDB_txn *txn,
                     const char *db_name,
@@ -655,10 +661,12 @@ txn_start: // return here if the transaction is discarded and must be repeated
           error = "adding/updating page info";
           goto on_error;
      }
-     *page_info_list = page_info_list_new(pi, hash);
-     if (!*page_info_list) {
-          error = "allocating new PageInfo list";
-          goto on_error;
+     if (page_info_list) {
+          *page_info_list = page_info_list_new(pi, hash);
+          if (!*page_info_list) {
+               error = "allocating new PageInfo list";
+               goto on_error;
+          }
      }
 
      size_t n_links = crawled_page_n_links(page);
@@ -688,7 +696,8 @@ txn_start: // return here if the transaction is discarded and must be repeated
                          error = "adding/updating link info";
                          goto on_error;
                     }
-                    if (!(*page_info_list = page_info_list_cons(*page_info_list, pi, hash))) {
+                    if (page_info_list &&
+                        !(*page_info_list = page_info_list_cons(*page_info_list, pi, hash))) {
                          error = "adding new PageInfo to list";
                          goto on_error;
                     }
@@ -741,7 +750,7 @@ on_error:
 }
 
 PageDBError
-page_db_get_info_from_hash(PageDB *db, uint64_t hash, PageInfo **pi) {
+page_db_get_info(PageDB *db, uint64_t hash, PageInfo **pi) {
      MDB_txn *txn;
      MDB_cursor *cur;
 
@@ -792,12 +801,7 @@ on_error:
 }
 
 PageDBError
-page_db_get_info_from_url(PageDB *db, const char *url, PageInfo **pi) {
-     return page_db_get_info_from_hash(db, XXH64(url, strlen(url), 0), pi);
-}
-
-PageDBError
-page_db_get_idx(PageDB *db, const char *url, uint64_t *idx) {
+page_db_get_idx(PageDB *db, uint64_t hash, uint64_t *idx) {
      MDB_txn *txn = 0;
      MDB_cursor *cur = 0;
 
@@ -812,7 +816,6 @@ page_db_get_idx(PageDB *db, const char *url, uint64_t *idx) {
           goto on_error;
      }
      else {
-          uint64_t hash = XXH64(url, strlen(url), 0);
           MDB_val key = {
                .mv_size = sizeof(uint64_t),
                .mv_data = &hash
@@ -938,7 +941,7 @@ page_db_link_stream_copy_links(PageDBLinkStream *es, MDB_val *key, MDB_val *val)
      es->i_to = 0;
      if (es->n_to > es->m_to) {
           if ((es->to = (uint64_t*)realloc(es->to, es->n_to*sizeof(uint64_t))) == 0) {
-               es->state = link_stream_state_error;
+               es->state = stream_state_error;
                return -1;
           }
           es->m_to = es->n_to;
@@ -983,7 +986,7 @@ page_db_link_stream_new(PageDBLinkStream **es, PageDB *db) {
      if (error != 0)
           goto mdb_error;
 
-     if (page_db_link_stream_reset(p) == link_stream_state_error) {
+     if (page_db_link_stream_reset(p) == stream_state_error) {
           error = "reseting stream";
           goto mdb_error;
      }
@@ -999,7 +1002,7 @@ mdb_error:
      return db->error.code;
 }
 
-LinkStreamState
+StreamState
 page_db_link_stream_reset(void *st) {
      PageDBLinkStream *es = st;
      int mdb_rc;
@@ -1008,21 +1011,21 @@ page_db_link_stream_reset(void *st) {
 
      switch (mdb_rc = mdb_cursor_get(es->cur, &key, &val, MDB_FIRST)) {
      case 0:
-          es->state = link_stream_state_init;
+          es->state = stream_state_init;
           if (page_db_link_stream_copy_links(es, &key, &val) != 0)
-               return link_stream_state_error;
+               return stream_state_error;
           break;
      case MDB_NOTFOUND:
-          es->state = link_stream_state_end;
+          es->state = stream_state_end;
           break;
      default:
-          es->state = link_stream_state_error;
+          es->state = stream_state_error;
           break;
      }
      return es->state;
 }
 
-LinkStreamState
+StreamState
 page_db_link_stream_next(void *st, Link *link) {
      PageDBLinkStream *es = st;
      while (es->i_to >= es->n_to) { // skip pages without links
@@ -1036,12 +1039,12 @@ page_db_link_stream_next(void *st, Link *link) {
                     return page_db_error_internal;
                break;
           case MDB_NOTFOUND:
-               return es->state = link_stream_state_end;
+               return es->state = stream_state_end;
           default:
-               return es->state = link_stream_state_error;
+               return es->state = stream_state_error;
           }
      }
-     es->state = link_stream_state_next;
+     es->state = stream_state_next;
      link->from = es->from;
      link->to = es->to[es->i_to++];
 
@@ -1058,6 +1061,69 @@ page_db_link_stream_delete(PageDBLinkStream *es) {
 }
 
 /// @}
+
+PageDBError
+hashidx_stream_new(HashIdxStream **st, PageDB *db) {
+     HashIdxStream *p = *st = calloc(1, sizeof(*p));
+     if (p == 0)
+          return page_db_error_memory;
+
+     MDB_txn *txn;
+     int mdb_rc = 0;
+     char *error = 0;
+
+     // start a new read transaction
+     if ((mdb_rc = mdb_txn_begin(db->env, 0, MDB_RDONLY, &txn)) != 0) {
+          error = "opening transaction";
+          goto mdb_error;
+     }
+     // open cursor to links database
+     if ((mdb_rc = page_db_open_hash2idx(txn, &p->cur)) != 0) {
+          error = "opening hash2idx cursor";
+          goto mdb_error;
+     }
+
+     p->state = stream_state_init;
+
+     return 0;
+
+mdb_error:
+     p->state = stream_state_error;
+
+     page_db_set_error(db, page_db_error_internal, __func__);
+     page_db_add_error(db, error);
+     if (mdb_rc != 0)
+          page_db_add_error(db, mdb_strerror(mdb_rc));
+
+     return db->error.code;
+}
+
+StreamState
+hashidx_stream_next(HashIdxStream *st, uint64_t *hash, size_t *idx) {
+     MDB_val key;
+     MDB_val val;
+     switch (mdb_cursor_get(st->cur, 
+                            &key, 
+                            &val, 
+                            st->state == stream_state_init? MDB_FIRST: MDB_NEXT)) {
+     case 0:
+          *hash = *(uint64_t*)key.mv_data;
+          *idx = *(size_t*)val.mv_data;
+          return st->state = stream_state_next;
+     case MDB_NOTFOUND:          
+          return st->state = stream_state_end;
+     default:
+          return st->state = stream_state_error;
+     }
+}
+
+void
+hashidx_stream_delete(HashIdxStream *st) {
+     MDB_txn *txn = mdb_cursor_txn(st->cur);
+     mdb_cursor_close(st->cur);
+     mdb_txn_abort(txn);
+     free(st);
+}
 
 #if (defined TEST) && TEST
 #include "CuTest.h"
@@ -1148,7 +1214,7 @@ test_page_db_simple(CuTest *tc) {
           PageInfo *pi;
           CuAssert(tc,
                    db->error.message,
-                   page_db_get_info_from_url(db, print_pages[i], &pi) == 0);
+                   page_db_get_info(db, page_db_hash(print_pages[i]), &pi) == 0);
 
           CuAssertPtrNotNull(tc, pi);
 
@@ -1183,10 +1249,10 @@ test_page_db_simple(CuTest *tc) {
               db->error.message,
               page_db_link_stream_new(&es, db) == 0);
 
-     if (es->state == link_stream_state_init) {
+     if (es->state == stream_state_init) {
           Link link;
           int i=0;
-          while (page_db_link_stream_next(es, &link) == link_stream_state_next) {
+          while (page_db_link_stream_next(es, &link) == stream_state_next) {
                switch(i++) {
                case 0:
                     CuAssertIntEquals(tc, 0, link.from);
@@ -1213,7 +1279,7 @@ test_page_db_simple(CuTest *tc) {
                     break;
                }
           }
-          CuAssertTrue(tc, es->state != link_stream_state_error);
+          CuAssertTrue(tc, es->state != stream_state_error);
      }
      page_db_link_stream_delete(es);
 
@@ -1385,7 +1451,7 @@ test_page_db_hits(CuTest *tc) {
      for (int i=0; i<5; ++i) {
           CuAssert(tc,
                    db->error.message,
-                   page_db_get_idx(db, urls[i], &idx) == 0);
+                   page_db_get_idx(db, page_db_hash(urls[i]), &idx) == 0);
 
           CuAssertPtrNotNull(tc,
                              h_score = mmap_array_idx(hits->h1, idx));
@@ -1529,7 +1595,7 @@ test_page_db_page_rank(CuTest *tc) {
      for (int i=0; i<5; ++i) {
           CuAssert(tc,
                    db->error.message,
-                   page_db_get_idx(db, urls[i], &idx) == 0);
+                   page_db_get_idx(db, page_db_hash(urls[i]), &idx) == 0);
 
           CuAssertPtrNotNull(tc,
                              score = mmap_array_idx(pr->value1, idx));
@@ -1546,6 +1612,73 @@ test_page_db_page_rank(CuTest *tc) {
      remove(test_dir);
 }
 
+void
+test_hashidx_stream(CuTest *tc) {
+     char test_dir[] = "test-bfs-XXXXXX";
+     mkdtemp(test_dir);
+     char *data = build_path(test_dir, "data.mdb");
+     char *lock = build_path(test_dir, "lock.mdb");
+
+     PageDB *db;
+     CuAssert(tc,
+              db!=0? db->error.message: "NULL",
+              page_db_new(&db, test_dir) == 0);
+
+     CrawledPage *cp = crawled_page_new("1");
+     crawled_page_add_link(cp, "a", 0);
+     crawled_page_add_link(cp, "b", 0);
+     CuAssert(tc,
+              db->error.message,
+              page_db_add(db, cp, 0) == 0);
+     crawled_page_delete(cp);
+
+     cp = crawled_page_new("2");
+     crawled_page_add_link(cp, "c", 0);
+     crawled_page_add_link(cp, "d", 0);
+     CuAssert(tc,
+              db->error.message,
+              page_db_add(db, cp, 0) == 0);
+     crawled_page_delete(cp);
+
+     HashIdxStream *stream;
+     CuAssert(tc,
+              db->error.message,
+              hashidx_stream_new(&stream, db) == 0);
+     
+     CuAssert(tc,
+              "stream was not initialized",
+              stream->state == stream_state_init);
+
+     uint64_t hash;
+     size_t idx;
+
+     uint64_t expected_hash[] = {
+          page_db_hash("1"),
+          page_db_hash("a"),
+          page_db_hash("b"),
+          page_db_hash("2"),
+          page_db_hash("c"),
+          page_db_hash("d")
+     };
+
+     for (int i=0; i<6; ++i) {
+          CuAssert(tc,
+                   "stream element expected",
+                   hashidx_stream_next(stream, &hash, &idx) == stream_state_next); 
+          if (idx > 5)
+               CuFail(tc, "unexpected index");
+          CuAssert(tc,
+                   "mismatch between index and hash",
+                   hash == expected_hash[idx]);
+     }
+     hashidx_stream_delete(stream);
+     
+     page_db_delete(db);
+     remove(data);
+     remove(lock);
+     remove(test_dir);
+}
+
 CuSuite *
 test_page_db_suite(void) {
      CuSuite *suite = CuSuiteNew();
@@ -1554,6 +1687,7 @@ test_page_db_suite(void) {
      SUITE_ADD_TEST(suite, test_page_db_hits);
      SUITE_ADD_TEST(suite, test_page_db_page_rank);
      SUITE_ADD_TEST(suite, test_page_db_large);
+     SUITE_ADD_TEST(suite, test_hashidx_stream);
 
      return suite;
 }

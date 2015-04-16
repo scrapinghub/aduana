@@ -249,6 +249,11 @@ typedef struct {
 } PageDB;
 
 
+/** Hash function used to convert from URL to hash */
+uint64_t 
+page_db_hash(const char *url);
+
+
 /** Creates a new database and stores data inside path
  *
  * @param db In case of @ref ::page_db_error_memory *db could be NULL, otherwise
@@ -293,19 +298,11 @@ page_db_add(PageDB *db, const CrawledPage *page, PageInfoList **page_info_list);
     NULL
  */
 PageDBError
-page_db_get_info_from_url(PageDB *db, const char *url, PageInfo **pi);
-
-/** Retrieve the PageInfo stored inside the database.
-
-    Beware that if not found it will signal success but the PageInfo will be
-    NULL
- */
-PageDBError
-page_db_get_info_from_hash(PageDB *db, uint64_t hash, PageInfo **pi);
+page_db_get_info(PageDB *db, uint64_t hash, PageInfo **pi);
 
 /** Get index for the given URL */
 PageDBError
-page_db_get_idx(PageDB *db, const char *url, uint64_t *idx);
+page_db_get_idx(PageDB *db, uint64_t hash, uint64_t *idx);
 
 /** Open a new cursor inside the database */
 int
@@ -330,14 +327,6 @@ page_db_open_info(MDB_txn *txn, MDB_cursor **cursor);
 /** Close database */
 void
 page_db_delete(PageDB *db);
-
-/** Compute, or update, the HITS scores */
-PageDBError
-page_db_update_hits(PageDB *db);
-
-/** Compute, or update, the PageRank scores */
-PageDBError
-page_db_update_page_rank(PageDB *db);
 /// @}
 
 /// @addtogroup LinkStream
@@ -353,7 +342,7 @@ typedef struct {
      size_t i_to;   /**< Current position inside @ref to */
      size_t m_to;   /**< Allocated memory for @ref to. It must be that @ref n_to <= @ref m_to. */
 
-     LinkStreamState state;
+     StreamState state;
 } PageDBLinkStream;
 
 /** Create a new stream from the given PageDB.
@@ -366,19 +355,42 @@ PageDBError
 page_db_link_stream_new(PageDBLinkStream **es, PageDB *db);
 
 /** Rewind stream to the beginning */
-LinkStreamState
+StreamState
 page_db_link_stream_reset(void *es);
 
 /** Get next element inside stream.
  *
  * @return @ref ::link_stream_state_next if success
  */
-LinkStreamState
+StreamState
 page_db_link_stream_next(void *es, Link *link);
 
 /** Delete link stream and free any transaction hold inside the database. */
 void
 page_db_link_stream_delete(PageDBLinkStream *es);
+
+/// @}
+
+/// @addtogroup HashIdxStream
+/// @{
+
+/** Stream over hash/index pairs insde PageDB */
+typedef struct {
+     MDB_cursor *cur;   /**< Cursor to the hash2idx database */     
+     StreamState state;
+} HashIdxStream;
+
+/** Create a new stream */
+PageDBError
+hashidx_stream_new(HashIdxStream **st, PageDB *db);
+
+/** Get next element in stream */
+StreamState
+hashidx_stream_next(HashIdxStream *st, uint64_t *hash, size_t *idx);
+
+/** Free stream */
+void
+hashidx_stream_delete(HashIdxStream *st);
 
 /// @}
 

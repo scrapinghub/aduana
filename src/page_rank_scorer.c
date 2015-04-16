@@ -38,8 +38,10 @@ page_rank_scorer_new(PageRankScorer **prs, PageDB *db) {
      return 0;
 }
 
-PageRankScorerError
-page_rank_update(PageRankScorer *prs) {
+int
+page_rank_scorer_update(void *state) {
+     PageRankScorer *prs = (PageRankScorer*)state;
+
      char *error1 = 0;
      char *error2 = 0;
 
@@ -69,6 +71,18 @@ on_error:
      page_rank_scorer_add_error(prs, error2);
 
      return prs->error.code;
+}
+
+int
+page_rank_scorer_add(void *state, const PageInfo *page_info, float *score) {
+     *score = 0.0;
+     return 0;
+}
+
+int
+page_rank_scorer_get(void *state, size_t idx, float *score_old, float *score_new) {
+     PageRankScorer *prs = (PageRankScorer*)state;
+     return page_rank_get(prs->page_rank, idx, score_old, score_new);
 }
 
 PageRankScorerError

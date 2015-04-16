@@ -3,6 +3,13 @@
 
 #define MAX_ERROR_LENGTH 10000
 
+typedef enum {
+     stream_state_init, /**< Stream ready */
+     stream_state_next, /**< A new element has been obtained */
+     stream_state_end,  /**< No more elements */
+     stream_state_error /**< Unexpected error */
+} StreamState;
+
 typedef struct {
      int code;
      char message[MAX_ERROR_LENGTH + 1];

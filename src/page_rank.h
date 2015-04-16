@@ -46,4 +46,7 @@ page_rank_compute(PageRank *pr,
                   LinkStreamResetFunc *link_stream_reset,
                   float precision);
 
+PageRankError
+page_rank_get(const PageRank *pr, size_t idx, float *score_old, float *score_new);
+
 #endif // _PAGE_RANK_H

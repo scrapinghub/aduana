@@ -30,7 +30,7 @@ typedef struct {
      /** Next link. Must be saved because we use delta encoding */
      Link next;
 
-     LinkStreamState state;
+     StreamState state;
 
      /** In case of error a description will be written here */
      char error_msg[LZ4_LINK_STREAM_MAX_ERROR_LENGTH + 1];
@@ -44,11 +44,11 @@ int
 lz4_link_stream_new(LZ4LinkStream **es, const char *fname);
 
 /** Get next link */
-LinkStreamState
+StreamState
 lz4_link_stream_next(void *st, Link *next);
 
 /** Reset stream to beginning */
-LinkStreamState
+StreamState
 lz4_link_stream_reset(void *st);
 
 /** Delete link stream. Close any open file and free all memory if succesfull.

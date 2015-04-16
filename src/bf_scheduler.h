@@ -3,6 +3,7 @@
 
 #include "page_db.h"
 #include "scheduler.h"
+#include "scorer.h"
 
 #define BF_SCHEDULER_MAX_ERROR_LENGTH 10000
 #define BF_SCHEDULER_DEFAULT_SIZE PAGE_DB_DEFAULT_SIZE
@@ -16,6 +17,7 @@ typedef enum {
 
 typedef struct {
      PageDB *page_db;
+     Scorer *scorer;
 
      MDB_env *env;
      char *path;
@@ -25,7 +27,7 @@ typedef struct {
 
 
 BFSchedulerError
-bf_scheduler_new(BFScheduler **sch, PageDB *db);
+bf_scheduler_new(BFScheduler **sch, PageDB *db, Scorer *scorer);
 
 BFSchedulerError
 bf_scheduler_add(BFScheduler *sch, const CrawledPage *page);

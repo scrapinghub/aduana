@@ -17,6 +17,25 @@
 #include "util.h"
 #include "scheduler.h"
 #include "bf_scheduler.h"
+#include "scorer.h"
+
+typedef struct {
+     float score;
+     uint64_t hash;
+} ScheduleEntry;
+
+/** Order keys from higher to lower */
+static int
+schedule_entry_mdb_cmp(const MDB_val *a, const MDB_val *b) {
+     ScheduleEntry *se_a = (ScheduleEntry*)a->mv_data;
+     ScheduleEntry *se_b = (ScheduleEntry*)b->mv_data;
+     return 
+          se_a->score < se_b->score? -1:
+          se_a->score > se_b->score? +1: 
+          // equal scores, order by hash
+          se_a->hash  < se_b->hash? -1:
+          se_a->hash  > se_b->hash? +1: 0;
+}
 
 
 static void
@@ -47,23 +66,15 @@ bf_scheduler_grow(BFScheduler *sch) {
      return sch->error.code;
 }
 
-
-/** Order floats from lower to greater */
-static int
-mdb_cmp_float(const MDB_val *a, const MDB_val *b) {
-     float x = *(float*)(a->mv_data);
-     float y = *(float*)(b->mv_data);
-     return x < y? -1: x > y? +1: 0;
-}
-
 BFSchedulerError
-bf_scheduler_new(BFScheduler **sch, PageDB *db) {
+bf_scheduler_new(BFScheduler **sch, PageDB *db, Scorer *scorer) {
      BFScheduler *p = *sch = malloc(sizeof(*p));
      if (!p)
           return bf_scheduler_error_memory;
      bf_scheduler_set_error(p, bf_scheduler_error_ok, "NO ERROR");
 
      p->page_db = db;
+     p->scorer = scorer;
 
      char *error = 0;
      if (!(p->path = concat(db->path, "bfs", '_')))
@@ -105,8 +116,8 @@ static int
 bf_scheduler_open_cursor(MDB_txn *txn, MDB_cursor **cursor) {
      MDB_dbi dbi;
      int mdb_rc =
-          mdb_dbi_open(txn, "schedule", MDB_CREATE | MDB_DUPSORT, &dbi) ||
-          mdb_set_compare(txn, dbi, mdb_cmp_float) ||
+          mdb_dbi_open(txn, "schedule", MDB_CREATE, &dbi) ||
+          mdb_set_compare(txn, dbi, schedule_entry_mdb_cmp) ||
           mdb_cursor_open(txn, dbi, cursor);
 
      if (mdb_rc != 0)
@@ -147,14 +158,21 @@ txn_start:
      for (PageInfoList *node = pil; node != 0; node=node->next) {
           PageInfo *pi = node->page_info;
           if (pi->n_crawls == 0) {
-               float score = -pi->score;
+               ScheduleEntry se = {
+                    .score = 0.0,
+                    .hash = node->hash
+               };
+               if (sch->scorer)
+                    sch->scorer->add(sch->scorer->state, pi, &se.score);
+               else 
+                    se.score = -pi->score;               
                MDB_val key = {
-                    .mv_size = sizeof(score),
-                    .mv_data = &score
+                    .mv_size = sizeof(se),
+                    .mv_data = &se
                };
                MDB_val val = {
-                    .mv_size = sizeof(node->hash),
-                    .mv_data = &node->hash
+                    .mv_size = 0,
+                    .mv_data = 0
                };
                if ((mdb_rc = mdb_cursor_put(cur, &key, &val, 0)) != 0) {
                     error1 = "adding page to schedule";
@@ -216,10 +234,12 @@ bf_scheduler_request(BFScheduler *sch, size_t n_pages, PageRequest **request) {
           MDB_val key;
           MDB_val val;
           PageInfo *pi;
+          ScheduleEntry *se;
 
           switch (mdb_rc = mdb_cursor_get(cur, &key, &val, MDB_FIRST)) {
           case 0:
-               switch (page_db_get_info_from_hash(sch->page_db, *(uint64_t*)val.mv_data, &pi)) {
+               se = key.mv_data;
+               switch (page_db_get_info(sch->page_db, se->hash, &pi)) {
                case 0:
                     if (pi->n_crawls == 0)
                          if (page_request_add_url(req, pi->url) != 0) {
@@ -293,7 +313,7 @@ test_bf_scheduler_requests(CuTest *tc) {
      BFScheduler *sch;
      CuAssert(tc,
               sch != 0? sch->error.message: "NULL",
-              bf_scheduler_new(&sch, db) == 0);
+              bf_scheduler_new(&sch, db, 0) == 0);
 
      char *test_dir_sch = sch->path;
      char *data_sch = build_path(test_dir_sch, "data.mdb");

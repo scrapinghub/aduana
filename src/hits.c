@@ -174,7 +174,7 @@ hits_set_n_pages(Hits *hits, size_t n_pages) {
 
 static HitsError
 hits_loop(Hits *hits,
-          void *link_stream_state,
+          void *stream_state,
           LinkStreamNextFunc *link_stream_next
      ) {
      Link link;
@@ -188,15 +188,15 @@ hits_loop(Hits *hits,
      mmap_array_zero(hits->a2);
 
      do {
-          switch(link_stream_next(link_stream_state, &link)) {
-          case link_stream_state_init:
+          switch(link_stream_next(stream_state, &link)) {
+          case stream_state_init:
                break;
-          case link_stream_state_error:
+          case stream_state_error:
                return hits_error_internal;
-          case link_stream_state_end:
+          case stream_state_end:
                end_stream = 1;
                break;
-          case link_stream_state_next:
+          case stream_state_next:
                // check if mmap array should be expanded
                if (link.from >= (int64_t)hits->n_pages)
                     if (hits_set_n_pages(hits, link.from + 1) != 0)
@@ -264,7 +264,11 @@ hits_end_loop(Hits *hits, float *delta) {
                float diff = fabs(*score2 - *score1);
                if (diff > *delta)
                     *delta = diff;
+               // swap scores, we want to retain the old score because it's needed
+               // to stream over scores updates
+               float tmp = *score1;
                *score1 = *score2;
+               *score2 = tmp;
           }
 
      // get total authority score
@@ -293,8 +297,9 @@ hits_end_loop(Hits *hits, float *delta) {
                float diff = fabs(*score2 - *score1);
                if (diff > *delta)
                     *delta = diff;
+               float tmp = *score1;
                *score1 = *score2;
-
+               *score2 = tmp;
           }
      return 0;
 on_error:
@@ -306,7 +311,7 @@ on_error:
 
 HitsError
 hits_compute(Hits *hits,
-             void *link_stream_state,
+             void *stream_state,
              LinkStreamNextFunc *link_stream_next,
              LinkStreamResetFunc *link_stream_reset,
              float precision) {
@@ -315,9 +320,9 @@ hits_compute(Hits *hits,
      float delta = precision + 1.0;
      size_t n_loops = 0;
      while (delta > precision) {
-          if ((rc = hits_loop(hits, link_stream_state, link_stream_next)) != 0)
+          if ((rc = hits_loop(hits, stream_state, link_stream_next)) != 0)
                return rc;
-          if (link_stream_reset(link_stream_state) == link_stream_state_error)
+          if (link_stream_reset(stream_state) == stream_state_error)
                return hits_error_internal;
           if ((rc = hits_end_loop(hits, &delta)) != 0)
                return rc;

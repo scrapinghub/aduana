@@ -29,7 +29,7 @@ file_size(int fd) {
 
 static void
 lz4_link_stream_set_error(LZ4LinkStream *es, const char *msg) {
-     es->state = link_stream_state_error;
+     es->state = stream_state_error;
      strncpy(es->error_msg, msg, LZ4_LINK_STREAM_MAX_ERROR_LENGTH);
 }
 
@@ -132,7 +132,7 @@ lz4_link_stream_new(LZ4LinkStream **es, const char *fname) {
 }
 
 
-LinkStreamState
+StreamState
 lz4_link_stream_next(void *st, Link *next) {
      LZ4LinkStream *es = st;
      // Remaning bytes in destination buffer
@@ -159,16 +159,16 @@ lz4_link_stream_next(void *st, Link *next) {
 
 	       if (LZ4F_isError(es->src_block_size)) {
 		    lz4_link_stream_set_error(es, LZ4F_getErrorName(es->src_block_size));
-		    return link_stream_state_error;
+		    return stream_state_error;
 	       }
 	       es->dst_size += bytes_in_dst;
 	       bytes_in_dst = es->dst_size - es->dst_read;
 	  } else if (bytes_in_dst == 0) {
-	       return link_stream_state_end;
+	       return stream_state_end;
 	  } else {
 	       /* If no more data is available no remaining bytes can be left */
 	       lz4_link_stream_set_error(es, "unexpected end of file");
-	       return link_stream_state_error;
+	       return stream_state_error;
 	  }
      }
      // Return edges from decompressed dst buffer
@@ -181,10 +181,10 @@ lz4_link_stream_next(void *st, Link *next) {
 
      *next = es->next;
 
-     return link_stream_state_next;
+     return stream_state_next;
 }
 
-LinkStreamState
+StreamState
 lz4_link_stream_reset(void *st) {
      LZ4LinkStream *es = st;
      char *fname = malloc(strlen(es->fname) + 1);
@@ -192,7 +192,7 @@ lz4_link_stream_reset(void *st) {
      lz4_link_stream_delete(es);
 
      if (lz4_link_stream_new(&es, fname) != 0)
-	  return link_stream_state_error;
+	  return stream_state_error;
 
      return 0;
 }

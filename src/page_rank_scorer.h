@@ -23,8 +23,8 @@ typedef struct {
 PageRankScorerError
 page_rank_scorer_new(PageRankScorer **prs, PageDB *db);
 
-PageRankScorerError
-page_rank_update(PageRankScorer *prs);
+int
+page_rank_scorer_update(void *state);
 
 PageRankScorerError
 page_rank_scorer_delete(PageRankScorer *prs);
