@@ -7,6 +7,7 @@
 
 #define BF_SCHEDULER_MAX_ERROR_LENGTH 10000
 #define BF_SCHEDULER_DEFAULT_SIZE PAGE_DB_DEFAULT_SIZE
+#define BF_SCHEDULER_UPDATE_BATCH_SIZE 1000
 
 typedef enum {
      bf_scheduler_error_ok = 0,       /**< No error */
@@ -22,6 +23,8 @@ typedef struct {
      MDB_env *env;
      char *path;
 
+     HashIdxStream *stream;
+
      Error error;
 } BFScheduler;
 
@@ -34,6 +37,9 @@ bf_scheduler_add(BFScheduler *sch, const CrawledPage *page);
 
 BFSchedulerError
 bf_scheduler_request(BFScheduler *sch, size_t n_pages, PageRequest **request);
+
+BFSchedulerError
+bf_scheduler_update(BFScheduler *sch);
 
 void
 bf_scheduler_delete(BFScheduler *sch);

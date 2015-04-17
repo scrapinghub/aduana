@@ -4,6 +4,7 @@
 
 #include <errno.h>
 #include <malloc.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,6 +19,7 @@
 #include "scheduler.h"
 #include "bf_scheduler.h"
 #include "scorer.h"
+#include "page_rank_scorer.h"
 
 typedef struct {
      float score;
@@ -29,9 +31,9 @@ static int
 schedule_entry_mdb_cmp(const MDB_val *a, const MDB_val *b) {
      ScheduleEntry *se_a = (ScheduleEntry*)a->mv_data;
      ScheduleEntry *se_b = (ScheduleEntry*)b->mv_data;
-     return 
+     return
           se_a->score < se_b->score? -1:
-          se_a->score > se_b->score? +1: 
+          se_a->score > se_b->score? +1:
           // equal scores, order by hash
           se_a->hash  < se_b->hash? -1:
           se_a->hash  > se_b->hash? +1: 0;
@@ -164,8 +166,8 @@ txn_start:
                };
                if (sch->scorer)
                     sch->scorer->add(sch->scorer->state, pi, &se.score);
-               else 
-                    se.score = -pi->score;               
+               else
+                    se.score = -pi->score;
                MDB_val key = {
                     .mv_size = sizeof(se),
                     .mv_data = &se
@@ -206,6 +208,157 @@ on_error:
           if (bf_scheduler_grow(sch) == 0)
                goto txn_start;
      }
+
+     bf_scheduler_set_error(sch, bf_scheduler_error_internal, __func__);
+     bf_scheduler_add_error(sch, error1);
+     bf_scheduler_add_error(sch, error2);
+     return sch->error.code;
+}
+
+static BFSchedulerError
+bf_scheduler_change_score(BFScheduler *sch,
+                          MDB_cursor *cur,
+                          uint64_t hash,
+                          float score_old,
+                          float score_new) {
+     char *error1 = 0;
+     char *error2 = 0;
+     // Delete old key
+     ScheduleEntry se = { .score = score_old, .hash = hash };
+     MDB_val key = {.mv_size = sizeof(se), .mv_data = &se};
+     MDB_val val = {0, 0};
+     int mdb_rc;
+     switch (mdb_rc = mdb_cursor_get(cur, &key, &val, MDB_SET)) {
+     case 0:
+          // Delete old key
+          if ((mdb_rc = mdb_cursor_del(cur, 0)) != 0) {
+               error1 = "deleting Hash/Idx item";
+               error2 = mdb_strerror(mdb_rc);
+               goto on_error;
+          }
+          break;
+     case MDB_NOTFOUND:
+          // OK, do nothing
+          break;
+     default:
+          error1 = "trying to retrieve Hash/Index item";
+          error2 = mdb_strerror(mdb_rc);
+          goto on_error;
+          break;
+     }
+     // Add new key
+     se.score = score_new;
+     if ((mdb_rc = mdb_cursor_put(cur, &key, &val, 0)) != 0) {
+          error1 = "adding updated Hash/Index item";
+          error2 = mdb_strerror(mdb_rc);
+          goto on_error;
+     }
+     return 0;
+
+on_error:
+     bf_scheduler_set_error(sch, bf_scheduler_error_internal, __func__);
+     bf_scheduler_add_error(sch, error1);
+     bf_scheduler_add_error(sch, error2);
+     return sch->error.code;
+}
+
+
+BFSchedulerError
+bf_scheduler_update(BFScheduler *sch) {
+     if (!sch->scorer)
+          return 0;
+
+     int retry = 1;
+
+     char *error1;
+     char *error2;
+     MDB_txn *txn;
+     MDB_cursor *cur;
+
+txn_start:
+     error1 = error2 = 0;
+     txn = 0;
+     cur = 0;
+
+     // if no Hash/Idx stream active create a new one. It will be deleted if:
+     //     1. We reach stream_state_end or
+     //     2. An error is produced
+     if (!sch->stream &&
+         (hashidx_stream_new(&sch->stream, sch->page_db) != 0)) {
+               error1 = "creating Hash/Index stream";
+               error2 = sch->page_db->error.message;
+               goto on_error;
+     }
+
+     // create new read/write transaction and cursor inside the schedule
+     int mdb_rc = mdb_txn_begin(sch->env, 0, 0, &txn) ||
+          bf_scheduler_open_cursor(txn, &cur);
+
+     // we make the update in batches because there can be only one simultaneous
+     // write transaction, and we need another write transaction to get requests, which
+     // actually has higher priority
+     for (size_t i=0; i<BF_SCHEDULER_UPDATE_BATCH_SIZE; ++i) {
+          uint64_t hash;
+          size_t idx;
+          float score_old;
+          float score_new;
+          switch (hashidx_stream_next(sch->stream, &hash, &idx)) {
+          case stream_state_next:
+               page_rank_scorer_get(sch->scorer, idx, &score_old, &score_new);
+               // to gain some performance we don't bother to change the schedule unless
+               // there is some significant score change
+               if (fabs(score_old - score_new) >= 0.1*fabs(score_old) &&
+                   (bf_scheduler_change_score(sch, cur, hash, score_old, score_new) != 0)) {
+                    // free resources
+                    hashidx_stream_delete(sch->stream);
+                    mdb_cursor_close(cur);
+                    mdb_txn_abort(txn);
+                    // and mark them as free
+                    sch->stream = 0;
+                    cur = 0;
+                    txn = 0;
+                    if (retry) {
+                         // it could be an error due to insufficient space, expand database
+                         // and retry just once more
+                         if ((bf_scheduler_grow(sch)) != 0)
+                              return sch->error.code;
+                         else {
+                              retry = 0;
+                              goto txn_start;
+                         }
+                    } else {
+                         return sch->error.code;
+                    }
+               }
+               break;
+          case stream_state_end:
+               hashidx_stream_delete(sch->stream);
+               sch->stream = 0;
+               break;
+          case stream_state_init: // not possible really
+          case stream_state_error:
+               error1 = "processing the Hash/Idx stream";
+               break;
+          }
+     }
+     mdb_cursor_close(cur);
+     cur = 0;
+
+     if ((mdb_rc = mdb_txn_commit(txn)) != 0) {
+          error1 = "commiting transaction";
+          error2 = mdb_strerror(mdb_rc);
+          goto on_error;
+     }
+     txn = 0;
+
+     return 0;
+on_error:
+     if (sch->stream)
+          hashidx_stream_delete(sch->stream);
+     if (cur)
+          mdb_cursor_close(cur);
+     if (txn)
+          mdb_txn_abort(txn);
 
      bf_scheduler_set_error(sch, bf_scheduler_error_internal, __func__);
      bf_scheduler_add_error(sch, error1);

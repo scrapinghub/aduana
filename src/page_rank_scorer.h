@@ -24,6 +24,9 @@ PageRankScorerError
 page_rank_scorer_new(PageRankScorer **prs, PageDB *db);
 
 int
+page_rank_scorer_get(void *state, size_t idx, float *score_old, float *score_new);
+
+int
 page_rank_scorer_update(void *state);
 
 PageRankScorerError
