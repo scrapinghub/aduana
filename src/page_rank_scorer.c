@@ -28,7 +28,7 @@ page_rank_scorer_new(PageRankScorer **prs, PageDB *db) {
      page_rank_scorer_set_error(p, page_rank_scorer_error_ok, "NO ERROR");
 
      p->page_db = db;
-     if (page_rank_new(&p->page_rank, db->path, 1000, 0.85) != 0) {
+     if (page_rank_new(&p->page_rank, db->path, 1000) != 0) {
           page_rank_scorer_set_error(p, page_rank_scorer_error_internal, __func__);
           page_rank_scorer_add_error(p, "initializing PageRank");
           page_rank_scorer_add_error(p, p? p->error.message: "NULL");
@@ -55,8 +55,7 @@ page_rank_scorer_update(void *state) {
      if (page_rank_compute(prs->page_rank, 
                            st, 
                            page_db_link_stream_next, 
-                           page_db_link_stream_reset,
-                           1e-4) != 0) {
+                           page_db_link_stream_reset) != 0) {
           error1 = "computing PageRank";
           error2 = prs->page_rank->error.message;
           goto on_error;
@@ -87,7 +86,7 @@ page_rank_scorer_get(void *state, size_t idx, float *score_old, float *score_new
 
 PageRankScorerError
 page_rank_scorer_delete(PageRankScorer *prs) {
-     if (page_rank_delete(prs->page_rank, 1) != 0) {
+     if (page_rank_delete(prs->page_rank) != 0) {
           page_rank_scorer_set_error(prs,  page_rank_scorer_error_internal, __func__);
           page_rank_scorer_add_error(prs, "deleting PageRank");
           page_rank_scorer_add_error(prs, 
@@ -97,3 +96,8 @@ page_rank_scorer_delete(PageRankScorer *prs) {
      }
      return prs->error.code;
 }
+
+#if (defined TEST) && TEST
+#include "CuTest.h"
+
+#endif // TEST

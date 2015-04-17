@@ -453,6 +453,8 @@ page_db_new(PageDB **db, const char *path) {
           return page_db_error_memory;
      page_db_set_error(p, page_db_error_ok, "NO ERROR");
 
+     p->persist = PAGE_DB_DEFAULT_PERSIST;
+
      // create directory if not present yet
      const char *error = make_dir(path);
      if ((p->path = strdup(path)) == 0) {
@@ -850,6 +852,16 @@ on_error:
 void
 page_db_delete(PageDB *db) {
      mdb_env_close(db->env);
+     if (!db->persist) {
+          char *data = build_path(db->path, "data.mdb");
+          char *lock = build_path(db->path, "lock.mdb");
+          remove(data);
+          remove(lock);
+          free(data);
+          free(lock);
+
+          remove(db->path);
+     }
      free(db->path);
      free(db);
 }
@@ -1089,15 +1101,12 @@ void
 test_page_db_simple(CuTest *tc) {
      char test_dir[] = "test-pagedb-XXXXXX";
      mkdtemp(test_dir);
-     char data[] = "test-pagedb-XXXXXX/data.mdb";
-     char lock[] = "test-pagedb-XXXXXX/lock.mdb";
-     for (size_t i=0; test_dir[i] != 0; i++)
-          data[i] = lock[i] = test_dir[i];
 
      PageDB *db;
      CuAssert(tc,
               db!=0? db->error.message: "NULL",
               page_db_new(&db, test_dir) == 0);
+     db->persist = 0;
 
      CrawledPage *cp1 = crawled_page_new("www.yahoo.com");
      crawled_page_add_link(cp1, "a", 0.1);
@@ -1208,10 +1217,6 @@ test_page_db_simple(CuTest *tc) {
      page_db_link_stream_delete(es);
 
      page_db_delete(db);
-
-     remove(data);
-     remove(lock);
-     remove(test_dir);
 }
 
 /* Tests the typical database operations on a moderate crawl of 10M pages */
@@ -1219,15 +1224,12 @@ void
 test_page_db_large(CuTest *tc) {
      char test_dir[] = "test-pagedb-XXXXXX";
      mkdtemp(test_dir);
-     char data[] = "test-pagedb-XXXXXX/data.mdb";
-     char lock[] = "test-pagedb-XXXXXX/lock.mdb";
-     for (size_t i=0; test_dir[i] != 0;  i++)
-          data[i] = lock[i] = test_dir[i];
 
      PageDB *db;
      CuAssert(tc,
               db!=0? db->error.message: "NULL",
               page_db_new(&db, test_dir) == 0);
+     db->persist = 0;
 
      const size_t n_links = 10;
      const size_t n_pages = 10000000;
@@ -1268,24 +1270,21 @@ test_page_db_large(CuTest *tc) {
               hits!=0? hits->error.message: "NULL",
               hits_new(&hits, test_dir, n_pages) == 0);
 
+     hits->precision = 1e-8;
      CuAssert(tc,
               hits->error.message,
               hits_compute(hits,
                            st,
                            page_db_link_stream_next,
-                           page_db_link_stream_reset,
-                           1e-8) == 0);
+                           page_db_link_stream_reset) == 0);
 
      CuAssert(tc,
               hits->error.message,
-              hits_delete(hits, 1) == 0);
+              hits_delete(hits) == 0);
 
      page_db_link_stream_delete(st);
 
      page_db_delete(db);
-     remove(data);
-     remove(lock);
-     remove(test_dir);
 }
 
 /* Checks the accuracy of the HITS computation */
@@ -1312,15 +1311,12 @@ test_page_db_hits(CuTest *tc) {
       */
      char test_dir[] = "test-pagedb-XXXXXX";
      mkdtemp(test_dir);
-     char data[] = "test-pagedb-XXXXXX/data.mdb";
-     char lock[] = "test-pagedb-XXXXXX/lock.mdb";
-     for (size_t i=0; test_dir[i] != 0;  i++)
-          data[i] = lock[i] = test_dir[i];
 
      PageDB *db;
      CuAssert(tc,
               db!=0? db->error.message: "NULL",
               page_db_new(&db, test_dir) == 0);
+     db->persist = 0;
 
      char *urls[5] = {"1", "2", "3", "4", "5" };
      LinkInfo links_1[] = {{"2", 0.1}, {"5", 0.1}};
@@ -1357,13 +1353,13 @@ test_page_db_hits(CuTest *tc) {
               hits!=0? hits->error.message: "NULL",
               hits_new(&hits, test_dir, 5) == 0);
 
+     hits->precision = 1e-8;
      CuAssert(tc,
               hits->error.message,
               hits_compute(hits,
                            st,
                            page_db_link_stream_next,
-                           page_db_link_stream_reset,
-                           1e-8) == 0);
+                           page_db_link_stream_reset) == 0);
      page_db_link_stream_delete(st);
 
      uint64_t idx;
@@ -1387,12 +1383,9 @@ test_page_db_hits(CuTest *tc) {
      }
      CuAssert(tc,
               hits->error.message,
-              hits_delete(hits, 1) == 0);
+              hits_delete(hits) == 0);
 
      page_db_delete(db);
-     remove(data);
-     remove(lock);
-     remove(test_dir);
 }
 
 /* Checks the accuracy of the PageRank computation */
@@ -1458,15 +1451,12 @@ test_page_db_page_rank(CuTest *tc) {
       */
      char test_dir[] = "test-pagedb-XXXXXX";
      mkdtemp(test_dir);
-     char data[] = "test-pagedb-XXXXXX/data.mdb";
-     char lock[] = "test-pagedb-XXXXXX/lock.mdb";
-     for (size_t i=0; test_dir[i] != 0;  i++)
-          data[i] = lock[i] = test_dir[i];
 
      PageDB *db;
      CuAssert(tc,
               db!=0? db->error.message: "NULL",
               page_db_new(&db, test_dir) == 0);
+     db->persist = 0;
 
      char *urls[5] = {"1", "2", "3", "4", "5" };
      LinkInfo links_1[] = {{"2", 0.1}, {"5", 0.1}};
@@ -1501,15 +1491,15 @@ test_page_db_page_rank(CuTest *tc) {
      PageRank *pr;
      CuAssert(tc,
               pr!=0? pr->error.message: "NULL",
-              page_rank_new(&pr, test_dir, 5, 0.85) == 0);
+              page_rank_new(&pr, test_dir, 5) == 0);
 
+     pr->precision = 1e-6;
      CuAssert(tc,
               pr->error.message,
               page_rank_compute(pr,
                                 st,
                                 page_db_link_stream_next,
-                                page_db_link_stream_reset,
-                                1e-6) == 0);
+                                page_db_link_stream_reset) == 0);
      page_db_link_stream_delete(st);
 
      uint64_t idx;
@@ -1528,25 +1518,21 @@ test_page_db_page_rank(CuTest *tc) {
      }
      CuAssert(tc,
               pr->error.message,
-              page_rank_delete(pr, 1) == 0);
+              page_rank_delete(pr) == 0);
 
      page_db_delete(db);
-     remove(data);
-     remove(lock);
-     remove(test_dir);
 }
 
 void
 test_hashidx_stream(CuTest *tc) {
      char test_dir[] = "test-bfs-XXXXXX";
      mkdtemp(test_dir);
-     char *data = build_path(test_dir, "data.mdb");
-     char *lock = build_path(test_dir, "lock.mdb");
 
      PageDB *db;
      CuAssert(tc,
               db!=0? db->error.message: "NULL",
               page_db_new(&db, test_dir) == 0);
+     db->persist = 0;
 
      CrawledPage *cp = crawled_page_new("1");
      crawled_page_add_link(cp, "a", 0);
@@ -1598,9 +1584,6 @@ test_hashidx_stream(CuTest *tc) {
      hashidx_stream_delete(stream);
      
      page_db_delete(db);
-     remove(data);
-     remove(lock);
-     remove(test_dir);
 }
 
 CuSuite *

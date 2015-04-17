@@ -33,7 +33,8 @@ main(int argc, char **argv) {
 
      clock_t t = clock();
      hits->max_loops = 30;
-     switch (hits_compute(hits, link_stream, lz4_link_stream_next, lz4_link_stream_reset, 1e-6)) {
+     hits->precision = 1e-6;
+     switch (hits_compute(hits, link_stream, lz4_link_stream_next, lz4_link_stream_reset)) {
      case 0:
 	  printf("HITS finished to desired precision\n");
 	  break;
@@ -56,7 +57,7 @@ main(int argc, char **argv) {
      }
 #endif
 
-     hits_delete(hits, 1);
+     hits_delete(hits);
 
      remove(data);
      remove(lock);

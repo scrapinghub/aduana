@@ -8,6 +8,7 @@
 #define BF_SCHEDULER_MAX_ERROR_LENGTH 10000
 #define BF_SCHEDULER_DEFAULT_SIZE PAGE_DB_DEFAULT_SIZE
 #define BF_SCHEDULER_UPDATE_BATCH_SIZE 1000
+#define BF_SCHEDULER_DEFAULT_PERSIST 1
 
 typedef enum {
      bf_scheduler_error_ok = 0,       /**< No error */
@@ -26,6 +27,9 @@ typedef struct {
      HashIdxStream *stream;
 
      Error error;
+
+     /** If true, do not delete files after deleting object*/
+     int persist;
 } BFScheduler;
 
 

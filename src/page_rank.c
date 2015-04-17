@@ -33,14 +33,16 @@ page_rank_add_error(PageRank *pr, const char *message) {
 }
 
 PageRankError
-page_rank_new(PageRank **pr, const char *path, size_t max_vertices, float damping) {
+page_rank_new(PageRank **pr, const char *path, size_t max_vertices) {
      PageRank *p = *pr = malloc(sizeof(*p));
      if (!p)
           return page_rank_error_memory;
 
-     p->damping = damping;
      p->n_pages = 0;
-     p->max_loops = 0;
+     p->damping = PAGE_RANK_DEFAULT_DAMPING;
+     p->max_loops = PAGE_RANK_DEFAULT_MAX_LOOPS;
+     p->persist = PAGE_RANK_DEFAULT_PERSIST;
+     p->precision = PAGE_RANK_DEFAULT_PRECISION;
      page_rank_set_error(p, page_rank_error_ok, "NO ERROR");
 
      char *error1 = 0;
@@ -98,7 +100,7 @@ on_error:
 }
 
 PageRankError
-page_rank_delete(PageRank *pr, int delete_files) {
+page_rank_delete(PageRank *pr) {
      if (!pr)
           return 0;
 
@@ -114,10 +116,10 @@ page_rank_delete(PageRank *pr, int delete_files) {
      } else if (mmap_array_delete(pr->value2) != 0) {
           error1 = "deleting value2";
           error2 = pr->value2->error.message;
-     } else if (delete_files && (remove(pr->path_out_degree) != 0)) {
+     } else if (!pr->persist && (remove(pr->path_out_degree) != 0)) {
           error1 = "deleting out_degree file";
           error2 = strerror(errno);
-     } else if (delete_files && (remove(pr->path_pr) != 0)) {
+     } else if (!pr->persist && (remove(pr->path_pr) != 0)) {
           error1 = "deleting pr file";
           error2 = strerror(errno);
      } else {
@@ -349,8 +351,7 @@ PageRankError
 page_rank_compute(PageRank *pr,
                   void *stream_state,
                   LinkStreamNextFunc *link_stream_next,
-                  LinkStreamResetFunc *link_stream_reset,
-                  float precision) {
+                  LinkStreamResetFunc *link_stream_reset) {
 
      PageRankError rc = 0;
 
@@ -359,9 +360,9 @@ page_rank_compute(PageRank *pr,
      if (link_stream_reset(stream_state) != 0)
           return page_rank_error_internal;
 
-     float delta = precision + 1.0;
+     float delta = pr->precision + 1.0;
      size_t n_loops = 0;
-     while (delta > precision) {
+     while (delta > pr->precision) {
           rc = page_rank_loop(pr, stream_state, link_stream_next);
           if (rc != 0)
                return rc;

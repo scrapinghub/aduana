@@ -36,7 +36,11 @@ hits_new(Hits **hits, const char *path, size_t max_vertices) {
      if (!p)
           return hits_error_memory;
      p->n_pages = 0;
-     p->max_loops = 0;
+
+     p->max_loops = HITS_DEFAULT_MAX_LOOPS;
+     p->precision = HITS_DEFAULT_PRECISION;
+     p->persist = HITS_DEFAULT_PERSIST;
+
      hits_set_error(p, hits_error_ok, "NO ERROR");
 
      char *error1 = 0;
@@ -100,7 +104,7 @@ on_error:
 }
 
 HitsError
-hits_delete(Hits *hits, int delete_files) {
+hits_delete(Hits *hits) {
      if (!hits)
           return 0;
 
@@ -119,10 +123,10 @@ hits_delete(Hits *hits, int delete_files) {
      } else if (mmap_array_delete(hits->a2) != 0) {
           error1 = "deleting a2";
           error2 = hits->a2->error.message;
-     } else if (delete_files && (remove(hits->path_h1) != 0)) {
+     } else if (!hits->persist && (remove(hits->path_h1) != 0)) {
           error1 = "deleting h1 file";
           error2 = strerror(errno);
-     } else if (delete_files && (remove(hits->path_h2) != 0)) {
+     } else if (!hits->persist && (remove(hits->path_h2) != 0)) {
           error1 = "deleting h2 file";
           error2 = strerror(errno);
      } else {
@@ -313,13 +317,12 @@ HitsError
 hits_compute(Hits *hits,
              void *stream_state,
              LinkStreamNextFunc *link_stream_next,
-             LinkStreamResetFunc *link_stream_reset,
-             float precision) {
+             LinkStreamResetFunc *link_stream_reset) {
      HitsError rc = 0;
 
-     float delta = precision + 1.0;
+     float delta = hits->precision + 1.0;
      size_t n_loops = 0;
-     while (delta > precision) {
+     while (delta > hits->precision) {
           if ((rc = hits_loop(hits, stream_state, link_stream_next)) != 0)
                return rc;
           if (link_stream_reset(stream_state) == stream_state_error)

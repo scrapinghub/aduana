@@ -23,7 +23,7 @@ main(int argc, char **argv) {
 	  data[i] = lock[i] = test_dir[i];
 
      PageRank *pr;
-     if (page_rank_new(&pr, test_dir, 1000000, 0.85) != 0)
+     if (page_rank_new(&pr, test_dir, 1000000) != 0)
 	  return -1;
 
      printf("Initialized PageRank\n");
@@ -34,7 +34,8 @@ main(int argc, char **argv) {
 
      clock_t t = clock();
      pr->max_loops = 30;
-     switch (page_rank_compute(pr, link_stream, lz4_link_stream_next, lz4_link_stream_reset, 1e-6)) {
+     pr->precision = 1e-6;
+     switch (page_rank_compute(pr, link_stream, lz4_link_stream_next, lz4_link_stream_reset)) {
      case 0:
 	  printf("PageRank finished to desired precision\n");
           break;
@@ -53,7 +54,7 @@ main(int argc, char **argv) {
      }
 #endif
 
-     page_rank_delete(pr, 1);
+     page_rank_delete(pr);
 
      remove(data);
      remove(lock);

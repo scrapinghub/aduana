@@ -221,11 +221,7 @@ typedef enum {
      page_db_error_no_page       /**< A page was requested but could not be found */
 } PageDBError;
 
-
-// TODO Make the building of the links database optional. The are many more links
-// that pages and it takes lot of space to store this structure. We should only
-// build the links database if we are going to use them, for example, to compute
-// PageRank or HITS scores.
+#define PAGE_DB_DEFAULT_PERSIST 1 /**< Default @ref PageDB.persist */
 
 /** Page database.
  *
@@ -246,6 +242,9 @@ typedef struct {
      char *path;
      MDB_env *env;
      Error error;
+     
+     /** If true, do not delete files after deleting object*/
+     int persist;
 } PageDB;
 
 
