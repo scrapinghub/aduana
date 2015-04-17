@@ -21,16 +21,32 @@
 #include "scorer.h"
 #include "page_rank_scorer.h"
 
+/** Structure used as key inside the schedule database.
+ *
+ * In the schedule we want to keep an ordered heap of hashes, where we can pop
+ * the highest scores whenever we want. In this sense it would have been more
+ * natural to use as keys the scores (a single float) and the values the hashes.
+ * However, the scores may change as the page database changes and we want a
+ * fast method to change the score associated to a hash. In particular we want
+ * to make the change:
+ *
+ *   (score_old, hash) --> (score_new, hash)
+ *
+ * Since there can be lots of pages with the same score we move the hash into
+ * the key, so that finding the previous (score_old, hash) can be done very fast */
 typedef struct {
      float score;
      uint64_t hash;
-} ScheduleEntry;
+} ScheduleKey;
 
-/** Order keys from higher to lower */
+/** Order keys from higher to lower
+ *
+ * First by score (descending) and then by hash.
+ * */
 static int
 schedule_entry_mdb_cmp(const MDB_val *a, const MDB_val *b) {
-     ScheduleEntry *se_a = (ScheduleEntry*)a->mv_data;
-     ScheduleEntry *se_b = (ScheduleEntry*)b->mv_data;
+     ScheduleKey *se_a = (ScheduleKey*)a->mv_data;
+     ScheduleKey *se_b = (ScheduleKey*)b->mv_data;
      return
           se_a->score < se_b->score? -1:
           se_a->score > se_b->score? +1:
@@ -161,7 +177,7 @@ txn_start:
      for (PageInfoList *node = pil; node != 0; node=node->next) {
           PageInfo *pi = node->page_info;
           if (pi->n_crawls == 0) {
-               ScheduleEntry se = {
+               ScheduleKey se = {
                     .score = 0.0,
                     .hash = node->hash
                };
@@ -225,7 +241,7 @@ bf_scheduler_change_score(BFScheduler *sch,
      char *error1 = 0;
      char *error2 = 0;
      // Delete old key
-     ScheduleEntry se = { .score = score_old, .hash = hash };
+     ScheduleKey se = { .score = score_old, .hash = hash };
      MDB_val key = {.mv_size = sizeof(se), .mv_data = &se};
      MDB_val val = {0, 0};
      int mdb_rc;
@@ -388,7 +404,7 @@ bf_scheduler_request(BFScheduler *sch, size_t n_pages, PageRequest **request) {
           MDB_val key;
           MDB_val val;
           PageInfo *pi;
-          ScheduleEntry *se;
+          ScheduleKey *se;
 
           switch (mdb_rc = mdb_cursor_get(cur, &key, &val, MDB_FIRST)) {
           case 0:
@@ -624,7 +640,7 @@ test_bf_scheduler_suite(void) {
      CuSuite *suite = CuSuiteNew();
      SUITE_ADD_TEST(suite, test_bf_scheduler_requests);
      SUITE_ADD_TEST(suite, test_bf_scheduler_large);
-     
+
      return suite;
 }
 

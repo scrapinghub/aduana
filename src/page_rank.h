@@ -28,6 +28,8 @@ typedef struct {
 
      Error error;
 
+// Options
+// -----------------------------------------------------------------------------
      /** Probability of making a random page jump: 1.0 - damping */
      float damping;
      /** If greater than 0 stop computation even if precision was not achieved */

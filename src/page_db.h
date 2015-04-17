@@ -242,7 +242,9 @@ typedef struct {
      char *path;
      MDB_env *env;
      Error error;
-     
+
+// Options
+// -----------------------------------------------------------------------------     
      /** If true, do not delete files after deleting object*/
      int persist;
 } PageDB;
