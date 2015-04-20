@@ -3,6 +3,7 @@
 
 #include "page_rank.h"
 #include "page_db.h"
+#include "scorer.h"
 #include "util.h"
 
 #define PAGE_RANK_SCORER_MAX_ERROR_LENGTH 10000
@@ -31,5 +32,8 @@ page_rank_scorer_update(void *state);
 
 PageRankScorerError
 page_rank_scorer_delete(PageRankScorer *prs);
+
+void
+page_rank_scorer_setup(PageRankScorer *prs, Scorer *scorer);
 
 #endif // __PAGE_RANK_SCORER_H__

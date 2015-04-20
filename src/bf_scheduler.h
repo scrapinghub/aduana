@@ -27,8 +27,8 @@ typedef struct {
      PageDB *page_db;
      /** The scorer use to get page score.
       *
-      * It can be NULL, in which case the PageInfo.score will be used */
-     Scorer *scorer;
+      * If not set up, the PageInfo.score will be used */
+     Scorer scorer;
 
      /** The scheduler state is maintained inside am LMDB environment */
      MDB_env *env;
@@ -59,12 +59,11 @@ typedef struct {
  * @param sch Where to create it. `*sch` can be NULL in case of memory error
  * @param db PageDB to attach. Remember it will not be created nor destroyed by
  *           the scheduler
- * @param scorer Optional, can be NULL.
  *
  * @return 0 if success, otherwise the error code
  */
 BFSchedulerError
-bf_scheduler_new(BFScheduler **sch, PageDB *db, Scorer *scorer);
+bf_scheduler_new(BFScheduler **sch, PageDB *db);
 
 /** Add a new crawled page
  *
@@ -90,11 +89,6 @@ bf_scheduler_add(BFScheduler *sch, const CrawledPage *page);
  */
 BFSchedulerError
 bf_scheduler_request(BFScheduler *sch, size_t n_pages, PageRequest **request);
-
-
-// TODO
-BFSchedulerError
-bf_scheduler_update(BFScheduler *sch);
 
 /** Delete scheduler.
  *

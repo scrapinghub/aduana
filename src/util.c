@@ -17,6 +17,11 @@ error_set(Error* error, int code, const char *message) {
      }
 }
 
+void
+error_clean(Error *error) {
+     error_set(error, 0, "NO ERROR");
+}
+
 static void
 error_add_aux(Error *error, const char *message) {
      if (error) {

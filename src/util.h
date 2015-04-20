@@ -19,6 +19,9 @@ void
 error_set(Error* error, int code, const char *msg);
 
 void
+error_clean(Error *error);
+
+void
 error_add(Error* error, const char *msg);
 
 char *

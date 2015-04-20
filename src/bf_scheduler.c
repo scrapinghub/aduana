@@ -2,6 +2,7 @@
 #define _BSD_SOURCE 1
 #define _GNU_SOURCE 1
 
+#include <assert.h>
 #include <errno.h>
 #include <malloc.h>
 #include <math.h>
@@ -62,6 +63,11 @@ bf_scheduler_set_error(BFScheduler *sch, int code, const char *message) {
 }
 
 static void
+bf_scheduler_clean_error(BFScheduler *sch) {
+     error_clean(&sch->error);
+}
+
+static void
 bf_scheduler_add_error(BFScheduler *sch, const char *message) {
      error_add(&sch->error, message);
 }
@@ -85,14 +91,13 @@ bf_scheduler_grow(BFScheduler *sch) {
 }
 
 BFSchedulerError
-bf_scheduler_new(BFScheduler **sch, PageDB *db, Scorer *scorer) {
+bf_scheduler_new(BFScheduler **sch, PageDB *db) {
      BFScheduler *p = *sch = malloc(sizeof(*p));
      if (!p)
           return bf_scheduler_error_memory;
      bf_scheduler_set_error(p, bf_scheduler_error_ok, "NO ERROR");
 
      p->page_db = db;
-     p->scorer = scorer;
      p->persist = BF_SCHEDULER_DEFAULT_PERSIST;
 
      char *error = 0;
@@ -181,8 +186,8 @@ txn_start:
                     .score = 0.0,
                     .hash = node->hash
                };
-               if (sch->scorer)
-                    sch->scorer->add(sch->scorer->state, pi, &se.score);
+               if (sch->scorer.state)
+                    sch->scorer.add(sch->scorer.state, pi, &se.score);
                else
                     se.score = -pi->score;
                MDB_val key = {
@@ -222,6 +227,7 @@ on_error:
 
      if (!failed) {
           failed = 1;
+          bf_scheduler_clean_error(sch);
           if (bf_scheduler_grow(sch) == 0)
                goto txn_start;
      }
@@ -280,10 +286,9 @@ on_error:
 }
 
 
-BFSchedulerError
-bf_scheduler_update(BFScheduler *sch) {
-     if (!sch->scorer)
-          return 0;
+static BFSchedulerError
+bf_scheduler_update_batch(BFScheduler *sch) {
+     assert(sch->scorer.state != 0);
 
      int retry = 1;
 
@@ -314,14 +319,15 @@ txn_start:
      // we make the update in batches because there can be only one simultaneous
      // write transaction, and we need another write transaction to get requests, which
      // actually has higher priority
-     for (size_t i=0; i<BF_SCHEDULER_UPDATE_BATCH_SIZE; ++i) {
+     for (size_t i=0; i<BF_SCHEDULER_UPDATE_BATCH_SIZE && sch->stream; ++i) {
+
           uint64_t hash;
           size_t idx;
           float score_old;
           float score_new;
           switch (hashidx_stream_next(sch->stream, &hash, &idx)) {
           case stream_state_next:
-               page_rank_scorer_get(sch->scorer, idx, &score_old, &score_new);
+               sch->scorer.get(sch->scorer.state, idx, &score_old, &score_new);
                // to gain some performance we don't bother to change the schedule unless
                // there is some significant score change
                if (fabs(score_old - score_new) >= 0.1*fabs(score_old) &&
@@ -337,6 +343,7 @@ txn_start:
                     if (retry) {
                          // it could be an error due to insufficient space, expand database
                          // and retry just once more
+                         bf_scheduler_clean_error(sch);
                          if ((bf_scheduler_grow(sch)) != 0)
                               return sch->error.code;
                          else {
@@ -382,6 +389,22 @@ on_error:
      bf_scheduler_add_error(sch, error2);
      return sch->error.code;
 }
+
+static BFSchedulerError
+bf_scheduler_update(BFScheduler *sch) {
+     if (sch->scorer.update(sch->scorer.state) != 0) {
+          bf_scheduler_set_error(sch, bf_scheduler_error_internal, __func__);
+          bf_scheduler_add_error(sch, "updating scorer");
+          return sch->error.code;
+     }
+     do {
+          if (bf_scheduler_update_batch(sch) != 0)
+               return sch->error.code;
+     } while (sch->stream);
+
+     return 0;
+}
+
 
 BFSchedulerError
 bf_scheduler_request(BFScheduler *sch, size_t n_pages, PageRequest **request) {
@@ -474,7 +497,6 @@ bf_scheduler_delete(BFScheduler *sch) {
      free(sch);
 }
 
-
 #if (defined TEST) && TEST
 #include "CuTest.h"
 
@@ -492,7 +514,7 @@ test_bf_scheduler_requests(CuTest *tc) {
      BFScheduler *sch;
      CuAssert(tc,
               sch != 0? sch->error.message: "NULL",
-              bf_scheduler_new(&sch, db, 0) == 0);
+              bf_scheduler_new(&sch, db) == 0);
      sch->persist = 0;
 
      /* Make the link structure
@@ -604,8 +626,14 @@ test_bf_scheduler_large(CuTest *tc) {
      BFScheduler *sch;
      CuAssert(tc,
               sch != 0? sch->error.message: "NULL",
-              bf_scheduler_new(&sch, db, 0) == 0);
+              bf_scheduler_new(&sch, db) == 0);
      sch->persist = 0;
+
+     PageRankScorer *prs;
+     CuAssert(tc,
+              prs != 0? prs->error.message: "NULL",
+              page_rank_scorer_new(&prs, db) == 0);
+     page_rank_scorer_setup(prs, &sch->scorer);
 
      const size_t n_links = 10;
      const size_t n_pages = 10000000;
@@ -631,6 +659,11 @@ test_bf_scheduler_large(CuTest *tc) {
                    bf_scheduler_add(sch, cp) == 0);
      }
 
+     CuAssert(tc,
+              sch->error.message,
+              bf_scheduler_update(sch) == 0);
+
+     page_rank_scorer_delete(prs);
      bf_scheduler_delete(sch);
      page_db_delete(db);
 }

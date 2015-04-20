@@ -97,6 +97,14 @@ page_rank_scorer_delete(PageRankScorer *prs) {
      return prs->error.code;
 }
 
+void
+page_rank_scorer_setup(PageRankScorer *prs, Scorer *scorer) {
+     scorer->state = (void*)prs;
+     scorer->add = page_rank_scorer_add;
+     scorer->get = page_rank_scorer_get;
+     scorer->update = page_rank_scorer_update;
+}
+
 #if (defined TEST) && TEST
 #include "CuTest.h"
 
