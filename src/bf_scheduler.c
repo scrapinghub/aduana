@@ -135,7 +135,7 @@ bf_scheduler_new(BFScheduler **sch, PageDB *db) {
      else if ((rc = mdb_env_open(
                     p->txn_manager->env,
                     p->path,
-                    MDB_WRITEMAP | MDB_MAPASYNC, 0664) != 0))
+                    MDB_NOTLS | MDB_WRITEMAP | MDB_MAPASYNC, 0664) != 0))
           error = "opening environment";
 
      if (error != 0) {

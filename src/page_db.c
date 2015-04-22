@@ -485,7 +485,7 @@ page_db_new(PageDB **db, const char *path) {
      else if ((mdb_rc = mdb_env_open(
                     p->txn_manager->env,
                     path,
-                    MDB_WRITEMAP | MDB_MAPASYNC, 0664) != 0))
+                    MDB_NOTLS | MDB_WRITEMAP | MDB_MAPASYNC, 0664) != 0))
           error = "opening environment";
      else if ((mdb_rc = txn_manager_begin(p->txn_manager, 0, &txn)) != 0)
           error = "starting transaction";
