@@ -1,6 +1,9 @@
 #ifndef __UTIL_H__
 #define __UTIL_H__
 
+#include <pthread.h>
+#include "lmdb.h"
+
 #define MAX_ERROR_LENGTH 10000
 
 typedef enum {
@@ -11,9 +14,19 @@ typedef enum {
 } StreamState;
 
 typedef struct {
+     /** Make operations on errors atomic. Errors in threading ops
+         will be silently ignored */
+     pthread_mutex_t mtx;
+
      int code;
      char message[MAX_ERROR_LENGTH + 1];
 } Error;
+
+void
+error_init(Error *error);
+
+void
+error_destroy(Error *error);
 
 void
 error_set(Error* error, int code, const char *msg);

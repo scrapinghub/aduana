@@ -55,7 +55,8 @@ mmap_array_new(MMapArray **marr,
 
      p->n_elements = n_elements;
      p->element_size = element_size;
-     mmap_array_set_error(p, mmap_array_error_ok, "NO ERROR");
+     
+     error_init(&p->error);
 
      char *error = 0;
      int errno_cp = 0;
@@ -162,6 +163,7 @@ mmap_array_delete(MMapArray *marr) {
 	  goto on_error;
      }
 
+     error_destroy(&marr->error);
      free(marr);
      return 0;
 

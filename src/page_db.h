@@ -19,6 +19,7 @@
 #include "hits.h"
 #include "link_stream.h"
 #include "page_rank.h"
+#include "txn_manager.h"
 
 #define KB 1024LL
 #define MB (1024*KB)
@@ -225,7 +226,7 @@ typedef enum {
 
 /** Page database.
  *
- * We are really talking about 5 diferent key/value databases:
+ * We are really talking about 4 diferent key/value databases:
  *   - info
  *        Contains fixed size information about the whole database. Right now
  *        it just contains the number pages stored.
@@ -240,7 +241,8 @@ typedef enum {
  */
 typedef struct {
      char *path;
-     MDB_env *env;
+     TxnManager* txn_manager;
+
      Error error;
 
 // Options
@@ -335,6 +337,7 @@ page_db_delete(PageDB *db);
 
 
 typedef struct {
+     PageDB *db; /** PageDB where links database is stored */
      MDB_cursor *cur; /**< Cursor to the links database */
 
      uint64_t from; /**< Current page */
@@ -377,6 +380,7 @@ page_db_link_stream_delete(PageDBLinkStream *es);
 
 /** Stream over hash/index pairs insde PageDB */
 typedef struct {
+     PageDB *db;
      MDB_cursor *cur;   /**< Cursor to the hash2idx database */     
      StreamState state;
 } HashIdxStream;

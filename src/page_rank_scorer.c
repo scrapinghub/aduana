@@ -11,8 +11,7 @@
 
 static void
 page_rank_scorer_set_error(PageRankScorer *prs, int code, const char *message) {
-     error_set(&prs->error, code, message);
-     
+     error_set(&prs->error, code, message);     
 }
 
 static void
@@ -25,7 +24,8 @@ page_rank_scorer_new(PageRankScorer **prs, PageDB *db) {
      PageRankScorer *p = *prs = malloc(sizeof(*p));
      if (!p)
           return page_rank_scorer_error_memory;
-     page_rank_scorer_set_error(p, page_rank_scorer_error_ok, "NO ERROR");
+
+     error_init(&p->error);
 
      p->page_db = db;
      if (page_rank_new(&p->page_rank, db->path, 1000) != 0) {
@@ -60,7 +60,7 @@ page_rank_scorer_update(void *state) {
           error2 = prs->page_rank->error.message;
           goto on_error;
      }
-
+     page_db_link_stream_delete(st);
      return 0;
 on_error:
      page_db_link_stream_delete(st);
@@ -68,7 +68,7 @@ on_error:
      page_rank_scorer_set_error(prs,  page_rank_scorer_error_internal, __func__);
      page_rank_scorer_add_error(prs, error1);
      page_rank_scorer_add_error(prs, error2);
-
+     printf("%s\n", prs->error.message);
      return prs->error.code;
 }
 
@@ -93,8 +93,11 @@ page_rank_scorer_delete(PageRankScorer *prs) {
                                      prs->page_rank? 
                                      prs->page_rank->error.message
                                      : "unknown error");
+          return prs->error.code;
      }
-     return prs->error.code;
+     error_destroy(&prs->error);
+     free(prs);
+     return 0;
 }
 
 void

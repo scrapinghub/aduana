@@ -38,9 +38,11 @@ add_library(pagedb SHARED
   src/bf_scheduler.c
   src/util.c
   src/page_rank_scorer.c
+  src/txn_manager.c
 )
 include_directories(src)
 target_link_libraries(pagedb lmdb xxhash)
+target_link_libraries(pagedb pthread)
 
 # Benchmarks
 #############################################################

@@ -43,7 +43,8 @@ page_rank_new(PageRank **pr, const char *path, size_t max_vertices) {
      p->max_loops = PAGE_RANK_DEFAULT_MAX_LOOPS;
      p->persist = PAGE_RANK_DEFAULT_PERSIST;
      p->precision = PAGE_RANK_DEFAULT_PRECISION;
-     page_rank_set_error(p, page_rank_error_ok, "NO ERROR");
+
+     error_init(&p->error);
 
      char *error1 = 0;
      char *error2 = 0;
@@ -125,6 +126,7 @@ page_rank_delete(PageRank *pr) {
      } else {
           free(pr->path_out_degree);
           free(pr->path_pr);
+          error_destroy(&pr->error);
           free(pr);
           return 0;
      }
@@ -272,7 +274,9 @@ page_rank_loop(PageRank *pr,
           case stream_state_init:
                break;
           case stream_state_error:
-               return page_rank_error_internal;
+               error1 = "getting next link";
+               error2 = "stream error";
+               goto on_error;
           case stream_state_end:
                end_stream = 1;
                break;
@@ -280,9 +284,17 @@ page_rank_loop(PageRank *pr,
                degree = mmap_array_idx(pr->out_degree, link.from);
                value1 = mmap_array_idx(pr->value1, link.from);
                value2 = mmap_array_idx(pr->value2, link.to);
-               if (!value1 || !value2 || !degree)
-                    return page_rank_error_internal;
-               *value2 += pr->damping*(*value1)/(*degree);
+#if 0 // ignore links out of the known graph
+               if (!value1 || !value2 || !degree) {
+                    error1 = "indexing next link";
+                    error2 = 
+                         value1 == 0? "value1":
+                         value2 == 0? "value2": "degree";
+                    goto on_error;
+               }
+#endif
+               if (value1 && value2 && degree)
+                    *value2 += pr->damping*(*value1)/(*degree);
                break;
           }
      } while (!end_stream);
@@ -357,8 +369,17 @@ page_rank_compute(PageRank *pr,
 
      if ((rc = page_rank_init(pr, stream_state, link_stream_next)) != 0)
           return rc;
-     if (link_stream_reset(stream_state) != 0)
-          return page_rank_error_internal;
+
+     switch (link_stream_reset(stream_state)) {
+     case stream_state_init:
+          break;
+     case stream_state_end:
+          return 0;
+     default:
+          page_rank_set_error(pr, page_rank_error_internal, __func__);
+          page_rank_add_error(pr, "resetting link stream");
+          return pr->error.code;          
+     }
 
      float delta = pr->precision + 1.0;
      size_t n_loops = 0;
@@ -366,15 +387,21 @@ page_rank_compute(PageRank *pr,
           rc = page_rank_loop(pr, stream_state, link_stream_next);
           if (rc != 0)
                return rc;
-          if (link_stream_reset(stream_state) == stream_state_error)
-               return page_rank_error_internal;
+          if (link_stream_reset(stream_state) == stream_state_error) {
+               page_rank_set_error(pr, page_rank_error_internal, __func__);
+               page_rank_add_error(pr, "resetting link stream");
+               return pr->error.code;
+          }
           rc = page_rank_end_loop(pr, &delta);
           if (rc != 0)
                return rc;
 
           ++n_loops;
-          if (n_loops == pr->max_loops)
-               return page_rank_error_precision;
+          if (n_loops == pr->max_loops) {
+               page_rank_set_error(pr, page_rank_error_precision, __func__);
+               page_rank_add_error(pr, "could not achieve precision");
+               return pr->error.code;
+          }
      }
 
      return 0;

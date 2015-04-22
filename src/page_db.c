@@ -16,6 +16,7 @@
 #include "page_db.h"
 #include "hits.h"
 #include "page_rank.h"
+#include "txn_manager.h"
 #include "util.h"
 
 static PageLinks *
@@ -397,19 +398,19 @@ page_db_open_cursor(MDB_txn *txn,
 int
 page_db_open_hash2info(MDB_txn *txn, MDB_cursor **cursor) {
      return page_db_open_cursor(
-          txn, "hash2info", MDB_CREATE | MDB_INTEGERKEY, cursor, 0);
+          txn, "hash2info", MDB_INTEGERKEY, cursor, 0);
 }
 
 int
 page_db_open_hash2idx(MDB_txn *txn, MDB_cursor **cursor) {
      return page_db_open_cursor(
-          txn, "hash2idx", MDB_CREATE | MDB_INTEGERKEY, cursor, 0);
+          txn, "hash2idx", MDB_INTEGERKEY, cursor, 0);
 }
 
 int
 page_db_open_links(MDB_txn *txn, MDB_cursor **cursor) {
      return page_db_open_cursor(
-          txn, "links", MDB_CREATE | MDB_INTEGERKEY, cursor, 0);
+          txn, "links", MDB_INTEGERKEY, cursor, 0);
 }
 
 int
@@ -434,14 +435,10 @@ page_db_add_error(PageDB *db, const char *message) {
  * of insufficient allocated mmap memory.
  */
 static PageDBError
-page_db_grow(PageDB *db) {
-     MDB_envinfo info;
-     int mdb_rc =
-          mdb_env_info(db->env, &info) ||
-          mdb_env_set_mapsize(db->env, info.me_mapsize*2);
-     if (mdb_rc != 0) {
+page_db_expand(PageDB *db) {
+     if (txn_manager_expand(db->txn_manager) != 0) {
           page_db_set_error(db, page_db_error_internal, __func__);
-          page_db_add_error(db, mdb_strerror(mdb_rc));
+          page_db_add_error(db, db->txn_manager->error.message);
      }
      return db->error.code;
 }
@@ -451,7 +448,7 @@ page_db_new(PageDB **db, const char *path) {
      PageDB *p = *db = malloc(sizeof(*p));
      if (p == 0)
           return page_db_error_memory;
-     page_db_set_error(p, page_db_error_ok, "NO ERROR");
+     error_init(&p->error);
 
      p->persist = PAGE_DB_DEFAULT_PERSIST;
 
@@ -466,26 +463,52 @@ page_db_new(PageDB **db, const char *path) {
           return p->error.code;
      }
 
+     if (txn_manager_new(&p->txn_manager, 0) != 0) {
+          page_db_set_error(p, page_db_error_internal, __func__);
+          page_db_add_error(p, p->txn_manager? 
+                            p->txn_manager->error.message: 
+                            "NULL");
+          return p->error.code;
+     }
+
      // initialize LMDB on the directory
      MDB_txn *txn;
      MDB_dbi dbi;
      int mdb_rc = 0;
-     if ((mdb_rc = mdb_env_create(&p->env) != 0))
+     if ((mdb_rc = mdb_env_create(&p->txn_manager->env) != 0))
           error = "creating environment";
-     else if ((mdb_rc = mdb_env_set_mapsize(p->env, PAGE_DB_DEFAULT_SIZE)) != 0)
+     else if ((mdb_rc = mdb_env_set_mapsize(
+                    p->txn_manager->env, PAGE_DB_DEFAULT_SIZE)) != 0)
           error = "setting map size";
-     else if ((mdb_rc = mdb_env_set_maxdbs(p->env, 5)) != 0)
+     else if ((mdb_rc = mdb_env_set_maxdbs(p->txn_manager->env, 5)) != 0)
           error = "setting number of databases";
      else if ((mdb_rc = mdb_env_open(
-                    p->env,
+                    p->txn_manager->env,
                     path,
-                    MDB_NOTLS | MDB_WRITEMAP | MDB_MAPASYNC, 0664) != 0))
+                    MDB_WRITEMAP | MDB_MAPASYNC, 0664) != 0))
           error = "opening environment";
-     else if ((mdb_rc = mdb_txn_begin(p->env, 0, 0, &txn)) != 0)
+     else if ((mdb_rc = txn_manager_begin(p->txn_manager, 0, &txn)) != 0)
           error = "starting transaction";
+     // create all database
+     else if ((mdb_rc = mdb_dbi_open(txn, 
+                                     "hash2info", 
+                                     MDB_CREATE | MDB_INTEGERKEY, 
+                                     &dbi)) != 0)
+          error = "creating hash2info database";
+     else if ((mdb_rc = mdb_dbi_open(txn, 
+                                     "hash2idx", 
+                                     MDB_CREATE | MDB_INTEGERKEY, 
+                                     &dbi)) != 0)
+          error = "creating hash2idx database";
+     else if ((mdb_rc = mdb_dbi_open(txn, 
+                                     "links", 
+                                     MDB_CREATE | MDB_INTEGERKEY, 
+                                     &dbi)) != 0)
+          error = "creating links database";
      else if ((mdb_rc = mdb_dbi_open(txn, "info", MDB_CREATE, &dbi)) != 0)
-          error = "opening info database";
+          error = "creating info database";
      else {
+          // initialize n_pages inside info database
           size_t n_pages = 0;
           MDB_val key = {
                .mv_size = sizeof(info_n_pages),
@@ -498,20 +521,20 @@ page_db_new(PageDB **db, const char *path) {
           switch (mdb_rc = mdb_put(txn, dbi, &key, &val, MDB_NOOVERWRITE)) {
           case MDB_KEYEXIST:
           case 0:
-               if ((mdb_rc = mdb_txn_commit(txn)) != 0)
-                    error = "could not commit n_pages";
+               if (txn_manager_commit(p->txn_manager, txn) != 0)
+                    error = p->txn_manager->error.message;
                break; // we good
           default:
                error = "could not initialize info.n_pages";
           }
      }
-
+     
      if (error != 0) {
           page_db_set_error(p, page_db_error_internal, __func__);
           page_db_add_error(p, error);
           page_db_add_error(p, mdb_strerror(mdb_rc));
 
-          mdb_env_close(p->env);
+          mdb_env_close(p->txn_manager->env);
      }
 
      return p->error.code;
@@ -607,6 +630,10 @@ on_error:
 
 PageDBError
 page_db_add(PageDB *db, const CrawledPage *page, PageInfoList **page_info_list) {
+     // check if page should be expanded
+     if (page_db_expand(db) != 0)
+          return db->error.code;
+
      MDB_txn *txn;
 
      MDB_cursor *cur_hash2info;
@@ -616,22 +643,14 @@ page_db_add(PageDB *db, const CrawledPage *page, PageInfoList **page_info_list) 
 
      MDB_val key;
      MDB_val val;
-
-     char *error;
+     
      int mdb_rc;
+     char *error = 0;
 
-     // we allow for the transaction to fail once. The reason is that if the
-     // database grows past the initial allocated space attempting to add
-     // more data will fail. Initially I tried to detect the MDB_MAP_FULL return
-     // code but LMDB uses the allocated space to maintain also a freeDB for
-     // its own purpose and the mdb_freelist_save gave an EPERMIT error when the
-     // database was filled.
-     int failed = 0;
-txn_start: // return here if the transaction is discarded and must be repeated
-     error = 0;
      // start a new write transaction
-     if ((mdb_rc = mdb_txn_begin(db->env, 0, 0, &txn)) != 0)
-          error = "opening transaction";
+     txn = 0;
+     if ((txn_manager_begin(db->txn_manager, 0, &txn)) != 0)
+          error = db->txn_manager->error.message;
      else if ((mdb_rc = page_db_open_hash2info(txn, &cur_hash2info)) != 0)
           error = "opening hash2info cursor";
      else if ((mdb_rc = page_db_open_hash2idx(txn, &cur_hash2idx)) != 0)
@@ -652,7 +671,6 @@ txn_start: // return here if the transaction is discarded and must be repeated
           goto on_error;
      }
      size_t n_pages = *(size_t*)val.mv_data;
-
 
      uint64_t hash = XXH64(page->url, strlen(page->url), 0);
      key.mv_size = sizeof(uint64_t);
@@ -729,26 +747,23 @@ txn_start: // return here if the transaction is discarded and must be repeated
           error = "storing links";
           goto on_error;
      }
-     if ((mdb_rc = mdb_txn_commit(txn) != 0)) {
-          error = "commiting transaction";
+     if (txn_manager_commit(db->txn_manager, txn) != 0) {
+          error = db->txn_manager->error.message;
           goto on_error;
      }
+     return db->error.code;
+
+on_error:
+     if (txn)
+          txn_manager_abort(db->txn_manager, txn);
+
+     page_db_set_error(db, page_db_error_internal, __func__);
+     page_db_add_error(db, error);
+     if (mdb_rc != 0)
+          page_db_add_error(db, mdb_strerror(mdb_rc));
 
      return db->error.code;
-on_error:
-     if (!failed) { // allow one failure
-          mdb_txn_abort(txn);
-          page_db_grow(db);
-          failed = 1;
-          goto txn_start;
-     } else {
-          page_db_set_error(db, page_db_error_internal, __func__);
-          page_db_add_error(db, error);
-          if (mdb_rc != 0)
-               page_db_add_error(db, mdb_strerror(mdb_rc));
-
-          return db->error.code;
-     }
+     
 }
 
 PageDBError
@@ -758,8 +773,8 @@ page_db_get_info(PageDB *db, uint64_t hash, PageInfo **pi) {
 
      int mdb_rc;
      char *error = 0;
-     if ((mdb_rc = mdb_txn_begin(db->env, 0, MDB_RDONLY, &txn)) != 0)
-          error = "opening transaction";
+     if (txn_manager_begin(db->txn_manager, MDB_RDONLY, &txn) != 0)
+          error = db->txn_manager->error.message;
      // open hash2info database
      else if ((mdb_rc = page_db_open_hash2info(txn, &cur)) != 0) {
           error = "opening hash2info database";
@@ -789,11 +804,11 @@ page_db_get_info(PageDB *db, uint64_t hash, PageInfo **pi) {
                break;
           }
      }
-     mdb_txn_abort(txn);
+     txn_manager_abort(db->txn_manager, txn);
      return 0;
 
 on_error:
-     mdb_txn_abort(txn);
+     txn_manager_abort(db->txn_manager, txn);
      page_db_set_error(db, page_db_error_internal, __func__);
      page_db_add_error(db, error);
      if (mdb_rc != 0)
@@ -809,8 +824,8 @@ page_db_get_idx(PageDB *db, uint64_t hash, uint64_t *idx) {
 
      int mdb_rc;
      char *error = 0;
-     if ((mdb_rc = mdb_txn_begin(db->env, 0, MDB_RDONLY, &txn)) != 0) {
-          error = "opening transaction";
+     if (txn_manager_begin(db->txn_manager, MDB_RDONLY, &txn) != 0) {
+          error = db->txn_manager->error.message;
           goto on_error;
      // open hash2info database
      } else if ((mdb_rc = page_db_open_hash2idx(txn, &cur)) != 0) {
@@ -839,7 +854,7 @@ page_db_get_idx(PageDB *db, uint64_t hash, uint64_t *idx) {
 
 on_error:
      if (txn != 0)
-          mdb_txn_abort(txn);
+          txn_manager_abort(db->txn_manager, txn);
      page_db_set_error(db, page_db_error_internal, __func__);
      page_db_add_error(db, error);
      if (mdb_rc != 0)
@@ -851,7 +866,10 @@ on_error:
 /** Close database */
 void
 page_db_delete(PageDB *db) {
-     mdb_env_close(db->env);
+
+     mdb_env_close(db->txn_manager->env);
+     txn_manager_delete(db->txn_manager);
+
      if (!db->persist) {
           char *data = build_path(db->path, "data.mdb");
           char *lock = build_path(db->path, "lock.mdb");
@@ -863,6 +881,7 @@ page_db_delete(PageDB *db) {
           remove(db->path);
      }
      free(db->path);
+     error_destroy(&db->error);
      free(db);
 }
 /// @}
@@ -891,72 +910,89 @@ page_db_link_stream_copy_links(PageDBLinkStream *es, MDB_val *key, MDB_val *val)
      return 0;
 }
 
-PageDBError
-page_db_link_stream_new(PageDBLinkStream **es, PageDB *db) {
-     PageDBLinkStream *p = *es = calloc(1, sizeof(*p));
-     if (p == 0)
-          return page_db_error_memory;
-
-     MDB_txn *txn;
+static PageDBError
+page_db_link_stream_open_cursor(PageDBLinkStream *es) {
+     MDB_txn *txn = 0;
      MDB_dbi dbi_links;
 
      int mdb_rc = 0;
      char *error = 0;
 
      // start a new read transaction
-     if ((mdb_rc = mdb_txn_begin(db->env, 0, MDB_RDONLY, &txn)) != 0)
-          error = "opening transaction";
-     // open cursor to links database
-     else if ((mdb_rc = mdb_dbi_open(
-                    txn,
-                    "links",
-                    MDB_CREATE | MDB_INTEGERKEY,
-                    &dbi_links)) != 0)
-          error = "opening links database";
-     else if ((mdb_rc = mdb_cursor_open(
-                    txn,
-                    dbi_links,
-                    &p->cur)) != 0)
-          error = "opening links cursor";
-
-     if (error != 0)
-          goto mdb_error;
-
-     if (page_db_link_stream_reset(p) == stream_state_error) {
-          error = "reseting stream";
+     if (txn_manager_begin(es->db->txn_manager, MDB_RDONLY, &txn) != 0) {
+          error = es->db->txn_manager->error.message;
           goto mdb_error;
      }
+     // open cursor to links database
+     switch (mdb_rc = mdb_dbi_open(
+                  txn,
+                  "links",
+                  MDB_INTEGERKEY,
+                  &dbi_links)) {
 
-     return db->error.code;
+     case 0:
+          if ((mdb_rc = mdb_cursor_open(
+                    txn,
+                    dbi_links,
+                    &es->cur)) != 0) {
+               error = "opening links cursor";
+               goto mdb_error;
+          }
+          es->state = stream_state_init;
+          break; 
+     case MDB_NOTFOUND:
+          txn_manager_abort(es->db->txn_manager, txn);
+          es->cur = 0;
+          es->state = stream_state_end;
+          break;
+     default:
+          error = "opening links database";
+          goto mdb_error;
+
+     }
+     return es->db->error.code;
 
 mdb_error:
-     page_db_set_error(db, page_db_error_internal, __func__);
-     page_db_add_error(db, error);
-     if (mdb_rc != 0)
-          page_db_add_error(db, mdb_strerror(mdb_rc));
+     es->state = stream_state_error;
+     if (txn)
+          txn_manager_abort(es->db->txn_manager, txn);    
+     es->cur = 0;
 
+     page_db_set_error(es->db, page_db_error_internal, __func__);
+     page_db_add_error(es->db, error);
+     if (mdb_rc != 0)
+          page_db_add_error(es->db, mdb_strerror(mdb_rc));
+
+     return es->db->error.code;
+}
+
+PageDBError
+page_db_link_stream_new(PageDBLinkStream **es, PageDB *db) {
+     PageDBLinkStream *p = *es = calloc(1, sizeof(*p));
+     if (p == 0)
+          return page_db_error_memory;
+     p->db = db;
+
+     StreamState state = page_db_link_stream_reset(p);
+     if (state == stream_state_error) {
+          page_db_set_error(db, page_db_error_internal, __func__);
+          page_db_add_error(db, "resetting link stream");
+     }
      return db->error.code;
 }
 
 StreamState
 page_db_link_stream_reset(void *st) {
      PageDBLinkStream *es = st;
-     int mdb_rc;
-     MDB_val key;
-     MDB_val val;
 
-     switch (mdb_rc = mdb_cursor_get(es->cur, &key, &val, MDB_FIRST)) {
-     case 0:
-          es->state = stream_state_init;
-          if (page_db_link_stream_copy_links(es, &key, &val) != 0)
-               return stream_state_error;
-          break;
-     case MDB_NOTFOUND:
-          es->state = stream_state_end;
-          break;
-     default:
-          es->state = stream_state_error;
-          break;
+     // if no cursor, try to create one
+     if (es->cur) {
+          txn_manager_abort(es->db->txn_manager, mdb_cursor_txn(es->cur));
+          es->cur = 0;
+     }
+
+     if (page_db_link_stream_open_cursor(es) != 0) {
+          return stream_state_error;
      }
      return es->state;
 }
@@ -964,6 +1000,8 @@ page_db_link_stream_reset(void *st) {
 StreamState
 page_db_link_stream_next(void *st, Link *link) {
      PageDBLinkStream *es = st;
+     if (!es->cur)
+          return es->state;
      while (es->i_to >= es->n_to) { // skip pages without links
           int mdb_rc;
           MDB_val key;
@@ -990,7 +1028,8 @@ page_db_link_stream_next(void *st, Link *link) {
 void
 page_db_link_stream_delete(PageDBLinkStream *es) {
      if (es) {
-          mdb_txn_abort(mdb_cursor_txn(es->cur));
+          if (es->cur)
+               txn_manager_abort(es->db->txn_manager, mdb_cursor_txn(es->cur));          
           free(es->to);
           free(es);
      }
@@ -1004,13 +1043,15 @@ hashidx_stream_new(HashIdxStream **st, PageDB *db) {
      if (p == 0)
           return page_db_error_memory;
 
+     p->db = db;
+
      MDB_txn *txn;
      int mdb_rc = 0;
      char *error = 0;
 
      // start a new read transaction
-     if ((mdb_rc = mdb_txn_begin(db->env, 0, MDB_RDONLY, &txn)) != 0) {
-          error = "opening transaction";
+     if (txn_manager_begin(db->txn_manager, MDB_RDONLY, &txn) != 0) {
+          error = db->txn_manager->error.message;
           goto mdb_error;
      }
      // open cursor to links database
@@ -1057,7 +1098,7 @@ void
 hashidx_stream_delete(HashIdxStream *st) {
      MDB_txn *txn = mdb_cursor_txn(st->cur);
      mdb_cursor_close(st->cur);
-     mdb_txn_abort(txn);
+     txn_manager_abort(st->db->txn_manager, txn);
      free(st);
 }
 

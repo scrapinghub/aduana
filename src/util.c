@@ -4,40 +4,66 @@
 
 #include <errno.h>
 #include <malloc.h>
+#include <pthread.h>
 #include <string.h>
 #include <sys/stat.h>
 
 #include "util.h"
 
+static void
+error_set_1(Error* error, int code, const char *message) {
+     error->code = code;
+     strncpy(error->message, message? message: "no description", MAX_ERROR_LENGTH);
+}
+
+static void
+error_set_2(Error* error, int code, const char *message) {
+     if (pthread_mutex_lock(&error->mtx) != 0)
+          return;
+     error_set_1(error, code, message);
+     (void)pthread_mutex_unlock(&error->mtx);     
+}
+
 void
-error_set(Error* error, int code, const char *message) {
-     if (error) {
-          error->code = code;
-          strncpy(error->message, message? message: "no description", MAX_ERROR_LENGTH);
-     }
+error_init(Error *error) {
+     (void)pthread_mutex_init(&error->mtx, 0);
+     error_set_1(error, 0, "NO ERROR");
+}
+
+void
+error_destroy(Error *error) {
+     (void)pthread_mutex_destroy(&error->mtx);
 }
 
 void
 error_clean(Error *error) {
-     error_set(error, 0, "NO ERROR");
+     if (error)
+          error_set_2(error, 0, "NO ERROR");
+}
+
+void
+error_set(Error* error, int code, const char *message) {
+     if (error && error->code == 0)
+          error_set_2(error, code, message);
 }
 
 static void
 error_add_aux(Error *error, const char *message) {
-     if (error) {
-          (void)strncat(
-               error->message,
-               message,
-               MAX_ERROR_LENGTH -
-               strnlen(error->message, MAX_ERROR_LENGTH));
-     }
+     (void)strncat(
+          error->message,
+          message,
+          MAX_ERROR_LENGTH -
+          strnlen(error->message, MAX_ERROR_LENGTH));
 }
 
 void
 error_add(Error* error, const char *message) {
      if (error && message) {
+          if (pthread_mutex_lock(&error->mtx) != 0)
+               return;
           error_add_aux(error, ": ");
           error_add_aux(error, message);
+          (void)pthread_mutex_unlock(&error->mtx);               
      }
 }
 

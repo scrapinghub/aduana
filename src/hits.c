@@ -41,7 +41,7 @@ hits_new(Hits **hits, const char *path, size_t max_vertices) {
      p->precision = HITS_DEFAULT_PRECISION;
      p->persist = HITS_DEFAULT_PERSIST;
 
-     hits_set_error(p, hits_error_ok, "NO ERROR");
+     error_init(&p->error);
 
      char *error1 = 0;
      char *error2 = 0;
@@ -132,6 +132,7 @@ hits_delete(Hits *hits) {
      } else {
           free(hits->path_h1);
           free(hits->path_h2);
+          error_destroy(&hits->error);
           free(hits);
           return 0;
      }

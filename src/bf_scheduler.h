@@ -1,9 +1,12 @@
 #ifndef __BF_SCHEDULER_H__
 #define __BF_SCHEDULER_H__
 
+#include <pthread.h>
+
 #include "page_db.h"
 #include "scheduler.h"
 #include "scorer.h"
+#include "txn_manager.h"
 
 #define BF_SCHEDULER_MAX_ERROR_LENGTH 10000
 #define BF_SCHEDULER_DEFAULT_SIZE PAGE_DB_DEFAULT_SIZE
@@ -14,8 +17,23 @@ typedef enum {
      bf_scheduler_error_ok = 0,       /**< No error */
      bf_scheduler_error_memory,       /**< Error allocating memory */
      bf_scheduler_error_invalid_path, /**< File system error */
-     bf_scheduler_error_internal      /**< Unexpected error */
+     bf_scheduler_error_internal,     /**< Unexpected error */
+     bf_scheduler_error_thread
 } BFSchedulerError;
+
+/** Flow:
+ *
+ *   None  ----> Working -----> Stopped -----> Finished
+ *                 ^              |               |
+ *                 +--------------+               |
+ *                 +------------------------------+
+ */
+typedef enum {
+     update_thread_none,
+     update_thread_working,
+     update_thread_stopped,
+     update_thread_finished
+} UpdateThreadState;
 
 typedef struct {
      /** Page database
@@ -31,7 +49,7 @@ typedef struct {
      Scorer scorer;
 
      /** The scheduler state is maintained inside am LMDB environment */
-     MDB_env *env;
+     TxnManager *txn_manager;
      /** Path to the @ref env
       *
       * It is built by appending `_bfs` to the @ref PageDB.path
@@ -46,6 +64,17 @@ typedef struct {
      HashIdxStream *stream;
 
      Error error;
+
+// Update thread
+// -----------------------------------------------------------------------------
+     pthread_mutex_t n_pages_mutex;
+     pthread_cond_t n_pages_cond;
+     double n_pages_old; /**< Number of pages when last updated was done */
+     double n_pages_new; /**< Current number of pages */
+
+     pthread_t update_thread;
+     pthread_mutex_t update_mutex;
+     UpdateThreadState update_state;
 
 // Options
 // -----------------------------------------------------------------------------
