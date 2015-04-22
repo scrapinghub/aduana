@@ -911,6 +911,10 @@ typedef void MDB_assert_func(MDB_env *env, const char *msg);
 	 */
 int  mdb_env_set_assert(MDB_env *env, MDB_assert_func *func);
 
+/** True if transaction is read only */
+int
+mdb_txn_rdonly(MDB_txn *txn);
+
 	/** @brief Create a transaction for use with the environment.
 	 *
 	 * The transaction handle may be discarded using #mdb_txn_abort() or #mdb_txn_commit().

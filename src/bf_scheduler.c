@@ -91,13 +91,13 @@ bf_scheduler_new(BFScheduler **sch, PageDB *db) {
      else if ((rc = pthread_cond_init(&p->n_pages_cond, 0)) != 0)
           error = "initializing n_pages cond";
 
-     if (error != 0) {          
+     if (error != 0) {
           bf_scheduler_set_error(p, bf_scheduler_error_thread, __func__);
           bf_scheduler_add_error(p, error);
           bf_scheduler_add_error(p, strerror(rc));
           return 0;
 
-     }     
+     }
      p->update_state = update_thread_none;
      p->n_pages_old = 0.0;
      p->n_pages_new = 0.0;
@@ -118,8 +118,8 @@ bf_scheduler_new(BFScheduler **sch, PageDB *db) {
 
      if (txn_manager_new(&p->txn_manager, 0) != 0) {
           bf_scheduler_set_error(p, bf_scheduler_error_internal, __func__);
-          bf_scheduler_add_error(p, p->txn_manager? 
-                                 p->txn_manager->error.message: 
+          bf_scheduler_add_error(p, p->txn_manager?
+                                 p->txn_manager->error.message:
                                  "NULL");
           return p->error.code;
      }
@@ -127,7 +127,7 @@ bf_scheduler_new(BFScheduler **sch, PageDB *db) {
      // initialize LMDB on the directory
      if ((rc = mdb_env_create(&p->txn_manager->env) != 0))
           error = "creating environment";
-     else if ((rc = mdb_env_set_mapsize(p->txn_manager->env, 
+     else if ((rc = mdb_env_set_mapsize(p->txn_manager->env,
                                         BF_SCHEDULER_DEFAULT_SIZE)) != 0)
           error = "setting map size";
      else if ((rc = mdb_env_set_maxdbs(p->txn_manager->env, 1)) != 0)
@@ -188,16 +188,16 @@ bf_scheduler_add(BFScheduler *sch, const CrawledPage *page) {
           error2 = sch->page_db->error.message;
           goto on_error;
      }
-     
+
      int rc = 0;
-     if ((rc = pthread_mutex_lock(&sch->n_pages_mutex)) != 0) 
+     if ((rc = pthread_mutex_lock(&sch->n_pages_mutex)) != 0)
           error1 = "locking n_pages mutex";
      else {
           sch->n_pages_new += 1.0;
           if ((rc = pthread_cond_broadcast(&sch->n_pages_cond)) != 0)
                error1 = "broadcasting n_pages signal";
           else if ((rc = pthread_mutex_unlock(&sch->n_pages_mutex)) != 0)
-               error1 = "unlocking n_pages mutex";          
+               error1 = "unlocking n_pages mutex";
      }
      if (error1 != 0) {
           error2 = strerror(rc);
@@ -314,17 +314,8 @@ static BFSchedulerError
 bf_scheduler_update_batch(BFScheduler *sch) {
      assert(sch->scorer.state != 0);
 
-     // TODO
-     // This should be done, since updating the batch could expand
-     // the database, however, sometimes it receives a SIGSEV while
-     // in mdb_env_info->mdb_env_pick_meta. It could be that if 
-     // a write transaction is active accessing the env_info is not secure.
-     // Maybe a modification inside TxnManager to track separately read and 
-     // and write transactions could solve it
-#if 0
      if (bf_scheduler_expand(sch) != 0)
           return sch->error.code;
-#endif
 
      char *error1 = 0;
      char *error2 = 0;
@@ -372,7 +363,7 @@ bf_scheduler_update_batch(BFScheduler *sch) {
                    (bf_scheduler_change_score(sch, cur, hash, score_old, score_new) != 0)) {
                     hashidx_stream_delete(sch->stream);
                     txn_manager_abort(sch->txn_manager, txn);
-                    return sch->error.code;                    
+                    return sch->error.code;
                }
                break;
           case stream_state_end:
@@ -427,7 +418,7 @@ bf_scheduler_mutex_lock(BFScheduler *sch) {
      if (rc != 0) {
           bf_scheduler_set_error(sch, bf_scheduler_error_thread, __func__);
           bf_scheduler_add_error(sch, "locking update thread mutex");
-          bf_scheduler_add_error(sch, strerror(rc));          
+          bf_scheduler_add_error(sch, strerror(rc));
      }
      return sch->error.code;
 }
@@ -438,37 +429,62 @@ bf_scheduler_mutex_unlock(BFScheduler *sch) {
      if (rc != 0) {
           bf_scheduler_set_error(sch, bf_scheduler_error_thread, __func__);
           bf_scheduler_add_error(sch, "unlocking update thread mutex");
-          bf_scheduler_add_error(sch, strerror(rc));          
+          bf_scheduler_add_error(sch, strerror(rc));
      }
      return sch->error.code;
+}
+
+static BFSchedulerError
+bf_scheduler_update_finished(BFScheduler *sch, int *stop) {
+     if (bf_scheduler_mutex_lock(sch) != 0)
+          return sch->error.code;
+
+     if (sch->update_state == update_thread_stopped)
+          sch->update_state = update_thread_finished;
+     *stop = (sch->update_state == update_thread_finished);
+
+     return bf_scheduler_mutex_unlock(sch);
 }
 
 void*
 bf_scheduler_update_thread(void *arg) {
      BFScheduler *sch = arg;
-     int rc;
-     do {          
-          pthread_mutex_lock(&sch->n_pages_mutex);
+     int stop = 0;
+     int rc = 0;
+     do {
+          if ((rc = pthread_mutex_lock(&sch->n_pages_mutex)) != 0)
+               goto error_thread;
+
           while ((sch->n_pages_new < sch->n_pages_old + 1000.0) ||
-                 (sch->n_pages_new < 1.1*sch->n_pages_old))
-               pthread_cond_wait(&sch->n_pages_cond, &sch->n_pages_mutex);
+                 (sch->n_pages_new < 1.1*sch->n_pages_old)) {
+               if ((rc = pthread_cond_wait(&sch->n_pages_cond,
+                                           &sch->n_pages_mutex)) != 0)
+                    goto error_thread;
+
+               if (bf_scheduler_update_finished(sch, &stop) != 0)
+                    return sch;
+               if (stop)
+                    break;
+          }
           sch->n_pages_old = sch->n_pages_new;
-          pthread_mutex_unlock(&sch->n_pages_mutex);
-          
-          if (bf_scheduler_update_step(sch) != 0)
+          if ((rc = pthread_mutex_unlock(&sch->n_pages_mutex)) != 0)
+               goto error_thread;
+
+          if (bf_scheduler_update_finished(sch, &stop) != 0)
+               return sch;
+
+          if (!stop && bf_scheduler_update_step(sch) != 0)
                break;
-         
-          // If the thread has been commanded to stop, then finish
-          if ((rc = bf_scheduler_mutex_lock(sch)) != 0)
+
+          if (bf_scheduler_update_finished(sch, &stop) != 0)
                return sch;
+     } while (!stop);
 
-          if (sch->update_state == update_thread_stopped)
-               sch->update_state = update_thread_finished;
+     return sch;
 
-          if ((rc = bf_scheduler_mutex_unlock(sch)) != 0)
-               return sch;
-     } while (sch->update_state != update_thread_finished);
-
+error_thread:
+     bf_scheduler_set_error(sch, bf_scheduler_error_thread, __func__);
+     bf_scheduler_add_error(sch, strerror(rc));
      return sch;
 }
 
@@ -487,7 +503,7 @@ bf_scheduler_update_start(BFScheduler *sch) {
                     bf_scheduler_set_error(sch, bf_scheduler_error_thread, __func__);
                     bf_scheduler_add_error(sch, "joining with update thread");
                     bf_scheduler_add_error(sch, strerror(rc));
-                    
+
                }
           case update_thread_none:
                // create a new thread and put to work
@@ -501,7 +517,7 @@ bf_scheduler_update_start(BFScheduler *sch) {
                     bf_scheduler_add_error(sch, strerror(rc));
                     return sch->error.code;
                }
-          case update_thread_stopped:             
+          case update_thread_stopped:
                sch->update_state = update_thread_working;
                break;
           case update_thread_working:
@@ -516,7 +532,7 @@ bf_scheduler_update_start(BFScheduler *sch) {
 
 BFSchedulerError
 bf_scheduler_update_stop(BFScheduler *sch) {
-     if (sch->scorer.state) 
+     if (sch->scorer.state)
           if (bf_scheduler_mutex_lock(sch) == 0) {
                switch (sch->update_state) {
                case update_thread_none:
@@ -525,14 +541,19 @@ bf_scheduler_update_stop(BFScheduler *sch) {
                     break;
                case update_thread_working:
                     sch->update_state = update_thread_stopped;
+
+                    pthread_mutex_lock(&sch->n_pages_mutex);
+                    pthread_cond_broadcast(&sch->n_pages_cond);
+                    pthread_mutex_unlock(&sch->n_pages_mutex);
+
                     break;
                case update_thread_stopped:
                case update_thread_finished:
                     // do nothing
                     break;
-               }               
+               }
                bf_scheduler_mutex_unlock(sch);
-          }     
+          }
      return sch->error.code;
 }
 
@@ -622,8 +643,10 @@ on_error:
 /** Close scheduler */
 void
 bf_scheduler_delete(BFScheduler *sch) {
-     if (sch->update_state != update_thread_none)
-          pthread_join(sch->update_thread, 0);
+     if (sch->update_state != update_thread_none) {
+          (void)bf_scheduler_update_stop(sch);
+          (void)pthread_join(sch->update_thread, 0);
+     }
 
      mdb_env_close(sch->txn_manager->env);
      if (!sch->persist) {
@@ -810,9 +833,8 @@ test_bf_scheduler_large(CuTest *tc) {
                    bf_scheduler_add(sch, cp) == 0);
      }
      bf_scheduler_update_stop(sch);
-     
-     page_rank_scorer_delete(prs);
      bf_scheduler_delete(sch);
+     page_rank_scorer_delete(prs);
      page_db_delete(db);
 }
 

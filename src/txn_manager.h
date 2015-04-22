@@ -44,8 +44,8 @@ typedef enum {
 
 typedef struct {
      MDB_env *env;     
-     InvSemaphore txn_counter;
-
+     InvSemaphore txn_counter_read;
+     InvSemaphore txn_counter_write;
      Error error;
 } TxnManager;
 

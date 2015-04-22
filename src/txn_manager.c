@@ -4,6 +4,7 @@
 
 #include <assert.h>
 #include <errno.h>
+#include <lmdb.h>
 #include <malloc.h>
 #include <pthread.h>
 #include <string.h>
@@ -15,7 +16,7 @@
 int
 inv_semaphore_init(InvSemaphore *is) {
      int rc = 0;
-     
+
      if ((rc = pthread_cond_init(&is->cond, 0)) != 0)
           return rc;
      if ((rc = pthread_mutex_init(&is->mtx_inc_dec, 0)) != 0)
@@ -31,8 +32,8 @@ int
 inv_semaphore_inc(InvSemaphore *is) {
      int rc = 0;
 
-     if ((rc = pthread_mutex_lock(&is->mtx_inc_pos)) != 0)  
-          return rc;     
+     if ((rc = pthread_mutex_lock(&is->mtx_inc_pos)) != 0)
+          return rc;
      if ((rc = pthread_mutex_lock(&is->mtx_inc_dec)) != 0)
           return rc;
      is->value++;
@@ -50,7 +51,7 @@ inv_semaphore_dec(InvSemaphore *is) {
           return rc;
      is->value--;
      if ((rc = pthread_cond_broadcast(&is->cond)) != 0)
-          return rc;     
+          return rc;
      rc = pthread_mutex_unlock(&is->mtx_inc_dec);
      return rc;
 }
@@ -64,12 +65,12 @@ int
 inv_semaphore_block(InvSemaphore *is) {
      int rc = 0;
      if ((rc = pthread_mutex_lock(&is->mtx_inc_pos)) != 0)
-          return rc;     
+          return rc;
      if ((rc = pthread_mutex_lock(&is->mtx_inc_dec)) != 0)
-          return rc;       
+          return rc;
      // 1. keep inc_pos to block an increment
      // 2. release inc_dec and wait from a signal from a decrement
-     while (is->value > 0) 
+     while (is->value > 0)
           if ((rc = pthread_cond_wait(&is->cond, &is->mtx_inc_dec)) != 0)
                return rc;
      return rc;
@@ -102,19 +103,24 @@ txn_manager_new(TxnManager **tm, MDB_env *env) {
      TxnManager *p = *tm = malloc(sizeof(*p));
      if (!p)
           return txn_manager_error_memory;
-     
+
      error_init(&p->error);
 
      p->env = env;
-     if (inv_semaphore_init(&p->txn_counter) != 0)
-          error_set(&p->error, txn_manager_error_thread, "creating txn counter");      
+     if (inv_semaphore_init(&p->txn_counter_read) != 0)
+          error_set(&p->error, txn_manager_error_thread, "creating read txn counter");
+     else if (inv_semaphore_init(&p->txn_counter_write) != 0)
+          error_set(&p->error, txn_manager_error_thread, "creating write txn counter");
 
      return p->error.code;
 }
 
 TxnManagerError
 txn_manager_begin(TxnManager *tm, int flags, MDB_txn **txn) {
-     if (inv_semaphore_inc(&tm->txn_counter) != 0) {
+     InvSemaphore *counter =
+          flags & MDB_RDONLY? &tm->txn_counter_read: &tm->txn_counter_write;
+
+     if (inv_semaphore_inc(counter) != 0) {
           error_set(&tm->error, txn_manager_error_thread, __func__);
           error_add(&tm->error, "incrementing txn counter");
           return tm->error.code;
@@ -122,7 +128,7 @@ txn_manager_begin(TxnManager *tm, int flags, MDB_txn **txn) {
      int mdb_rc = mdb_txn_begin(tm->env, 0, flags, txn);
      if (mdb_rc != 0) {
           error_set(&tm->error, txn_manager_error_mdb, __func__);
-          error_add(&tm->error, "beginning new transaction");          
+          error_add(&tm->error, "beginning new transaction");
           error_add(&tm->error, mdb_strerror(mdb_rc));
 
           txn_manager_abort(tm, *txn);
@@ -132,38 +138,52 @@ txn_manager_begin(TxnManager *tm, int flags, MDB_txn **txn) {
 
 TxnManagerError
 txn_manager_commit(TxnManager *tm, MDB_txn *txn) {
+     InvSemaphore *counter =
+          mdb_txn_rdonly(txn)?
+          &tm->txn_counter_read: &tm->txn_counter_write;
+
      int mdb_rc = mdb_txn_commit(txn);
      if (mdb_rc != 0) {
           error_set(&tm->error, txn_manager_error_mdb, __func__);
-          error_add(&tm->error, "commiting new transaction");          
+          error_add(&tm->error, "commiting new transaction");
           error_add(&tm->error, mdb_strerror(mdb_rc));
 
           txn_manager_abort(tm, txn);
-     } else if (inv_semaphore_dec(&tm->txn_counter) != 0) {
+     } else if (inv_semaphore_dec(counter) != 0) {
           error_set(&tm->error, txn_manager_error_thread, __func__);
-          error_add(&tm->error, "decrementing txn counter");          
+          error_add(&tm->error, "decrementing txn counter");
      }
      return tm->error.code;
 }
 
 TxnManagerError
 txn_manager_abort(TxnManager *tm, MDB_txn *txn) {
+    InvSemaphore *counter =
+          mdb_txn_rdonly(txn)?
+          &tm->txn_counter_read: &tm->txn_counter_write;
+
      mdb_txn_abort(txn);
-     if (inv_semaphore_dec(&tm->txn_counter) != 0) {
+     if (inv_semaphore_dec(counter) != 0) {
           error_set(&tm->error, txn_manager_error_thread, __func__);
-          error_add(&tm->error, "decrementing txn counter");          
+          error_add(&tm->error, "decrementing txn counter");
      }
      return tm->error.code;
 }
 
 TxnManagerError
 txn_manager_delete(TxnManager *tm) {
-     if (inv_semaphore_count(&tm->txn_counter) != 0) {
+     if (inv_semaphore_count(&tm->txn_counter_read) != 0) {
           error_set(&tm->error, txn_manager_error_internal, __func__);
-          error_add(&tm->error, "transactions still active");          
-     } else if (inv_semaphore_destroy(&tm->txn_counter) != 0) {
+          error_add(&tm->error, "read transactions still active");
+     } else if (inv_semaphore_count(&tm->txn_counter_write) != 0) {
+          error_set(&tm->error, txn_manager_error_internal, __func__);
+          error_add(&tm->error, "write transactions still active");
+     } else if (inv_semaphore_destroy(&tm->txn_counter_read) != 0) {
           error_set(&tm->error, txn_manager_error_thread, __func__);
-          error_add(&tm->error, "destroying txn counter");          
+          error_add(&tm->error, "destroying read txn counter");
+     } else if (inv_semaphore_destroy(&tm->txn_counter_write) != 0) {
+          error_set(&tm->error, txn_manager_error_thread, __func__);
+          error_add(&tm->error, "destroying write txn counter");
      } else {
           error_destroy(&tm->error);
           free(tm);
@@ -184,6 +204,9 @@ txn_manager_expand(TxnManager *tm) {
      } while(0)
 
 
+     if ((rc = inv_semaphore_block(&tm->txn_counter_write)) != 0)
+          ERROR("blocking write counter", error_thread);
+
      MDB_envinfo info;
      if ((rc = mdb_env_info(tm->env, &info)) != 0)
           ERROR("getting environment info", error_mdb);
@@ -191,22 +214,24 @@ txn_manager_expand(TxnManager *tm) {
      MDB_stat stat;
      if ((rc = mdb_env_stat(tm->env, &stat)) != 0)
           ERROR("getting environment stats", error_mdb);
-          
+
      size_t max_pgno = info.me_mapsize/stat.ms_psize;
      if (max_pgno < info.me_last_pgno + MDB_MINIMUM_FREE_PAGES) {
           // we disallow creating new transactions, but allow aborting/commiting
           // until the txn_counter reaches 0
-          if ((rc = inv_semaphore_block(&tm->txn_counter)) != 0)
-               ERROR("blocking inverse semaphore", error_thread);
+          if ((rc = inv_semaphore_block(&tm->txn_counter_read)) != 0)
+               ERROR("blocking read counter", error_thread);
 
           // at this point no transactions are active
           if ((rc = mdb_env_set_mapsize(tm->env, info.me_mapsize*2)) != 0)
                ERROR("increasing mapsize", error_mdb);
 
           // allow transactions again
-          if ((rc = inv_semaphore_release(&tm->txn_counter)) != 0)
-               ERROR("releasing inverse semaphore", error_thread);
+          if ((rc = inv_semaphore_release(&tm->txn_counter_read)) != 0)
+               ERROR("releasing read counter", error_thread);
      }
+     if ((rc = inv_semaphore_release(&tm->txn_counter_write)) != 0)
+          ERROR("releasing write counter", error_thread);
 
      return tm->error.code;
 error_thread:
@@ -219,4 +244,3 @@ error_mdb:
      error_add(&tm->error, mdb_strerror(rc));
      return tm->error.code;
 }
-
