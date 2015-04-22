@@ -77,6 +77,11 @@ bf_scheduler_new(BFScheduler **sch, PageDB *db) {
 
      error_init(&p->error);
 
+     p->scorer.state = 0;
+     p->scorer.add = 0;
+     p->scorer.get = 0;
+     p->scorer.update = 0;
+
      char *error = 0;
      int rc;
      if ((rc = pthread_mutex_init(&p->update_mutex, 0)) != 0)
