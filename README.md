@@ -23,6 +23,12 @@ Prototype application for processing huge graphs and compute PageRank, HITS or o
 2. ./fetch_live_journal
 
 ## Test
+
+### Unit tests
+1. cd debug && make
+2. ./test
+
+### Benchmarks
 1. cd release
 2. ./page_rank ../test/data/live_journal/*.lz4
 3. ./hits ../test/data/live_journal/*.lz4
