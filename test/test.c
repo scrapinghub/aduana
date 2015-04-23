@@ -16,5 +16,7 @@ int main(void) {
      CuSuiteDetails(suite, output);
      printf("%s\n", output->buffer);
      
+     CuStringDelete(output);
+
      return 0;
 }

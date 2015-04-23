@@ -23,6 +23,7 @@
 #include "bf_scheduler.h"
 #include "scorer.h"
 #include "page_rank_scorer.h"
+#include "hits_scorer.h"
 
 /** Structure used as key inside the schedule database.
  *
@@ -649,6 +650,7 @@ bf_scheduler_delete(BFScheduler *sch) {
      }
 
      mdb_env_close(sch->txn_manager->env);
+     (void)txn_manager_delete(sch->txn_manager);
      if (!sch->persist) {
           char *data = build_path(sch->path, "data.mdb");
           char *lock = build_path(sch->path, "lock.mdb");
@@ -776,11 +778,13 @@ test_bf_scheduler_requests(CuTest *tc) {
 
      bf_scheduler_delete(sch);
      page_db_delete(db);
+
+     free(crawl);
 }
 
 /* Tests the typical database operations on a moderate crawl of 10M pages */
 void
-test_bf_scheduler_large(CuTest *tc) {
+test_bf_scheduler_large_page_rank(CuTest *tc) {
      char test_dir_db[] = "test-bfs-XXXXXX";
      mkdtemp(test_dir_db);
 
@@ -796,12 +800,12 @@ test_bf_scheduler_large(CuTest *tc) {
               bf_scheduler_new(&sch, db) == 0);
      sch->persist = 0;
 
-     PageRankScorer *prs;
+     PageRankScorer *scorer;
      CuAssert(tc,
-              prs != 0? prs->error.message: "NULL",
-              page_rank_scorer_new(&prs, db) == 0);
+              scorer != 0? scorer->error.message: "NULL",
+              page_rank_scorer_new(&scorer, db) == 0);
 
-     page_rank_scorer_setup(prs, &sch->scorer);
+     page_rank_scorer_setup(scorer, &sch->scorer);
      bf_scheduler_update_start(sch);
 
      const size_t n_links = 10;
@@ -818,10 +822,10 @@ test_bf_scheduler_large(CuTest *tc) {
           if (i % 1000 == 0)
                printf("%zu\n", i);
 #endif
-
+          free(links[0].url);
           for (size_t j=0; j<n_links; ++j)
                links[j] = links[j+1];
-          sprintf(links[n_links].url, "test_url_%zu", i + n_links);
+          sprintf(links[n_links].url = malloc(50), "test_url_%zu", i + n_links);
           links[n_links].score = i;
 
           CrawledPage *cp = crawled_page_new(links[0].url);
@@ -831,10 +835,77 @@ test_bf_scheduler_large(CuTest *tc) {
           CuAssert(tc,
                    sch->error.message,
                    bf_scheduler_add(sch, cp) == 0);
+          crawled_page_delete(cp);
      }
+     for (size_t j=0; j<=n_links; ++j)
+          free(links[j].url);
+
      bf_scheduler_update_stop(sch);
      bf_scheduler_delete(sch);
-     page_rank_scorer_delete(prs);
+     page_rank_scorer_delete(scorer);
+     page_db_delete(db);
+}
+
+/* Tests the typical database operations on a moderate crawl of 10M pages */
+void
+test_bf_scheduler_large_hits(CuTest *tc) {
+     char test_dir_db[] = "test-bfs-XXXXXX";
+     mkdtemp(test_dir_db);
+
+     PageDB *db;
+     CuAssert(tc,
+              db!=0? db->error.message: "NULL",
+              page_db_new(&db, test_dir_db) == 0);
+     db->persist = 0;
+
+     BFScheduler *sch;
+     CuAssert(tc,
+              sch != 0? sch->error.message: "NULL",
+              bf_scheduler_new(&sch, db) == 0);
+     sch->persist = 0;
+
+     HitsScorer *scorer;
+     CuAssert(tc,
+              scorer != 0? scorer->error.message: "NULL",
+              hits_scorer_new(&scorer, db) == 0);
+
+     hits_scorer_setup(scorer, &sch->scorer);
+     bf_scheduler_update_start(sch);
+
+     const size_t n_links = 10;
+     const size_t n_pages = 10000000;
+
+     LinkInfo links[n_links + 1];
+     for (size_t j=0; j<=n_links; ++j) {
+          sprintf(links[j].url = malloc(50), "test_url_%zu", j);
+          links[j].score = j;
+     }
+
+     for (size_t i=0; i<n_pages; ++i) {
+#if 0
+          if (i % 1000 == 0)
+               printf("%zu\n", i);
+#endif
+          free(links[0].url);
+          for (size_t j=0; j<n_links; ++j)
+               links[j] = links[j+1];
+          sprintf(links[n_links].url = malloc(50), "test_url_%zu", i + n_links);
+          links[n_links].score = i;
+
+          CrawledPage *cp = crawled_page_new(links[0].url);
+          for (size_t j=1; j<=n_links; ++j)
+               crawled_page_add_link(cp, links[j].url, 0.5);
+
+          CuAssert(tc,
+                   sch->error.message,
+                   bf_scheduler_add(sch, cp) == 0);
+          crawled_page_delete(cp);
+     }
+     for (size_t j=0; j<=n_links; ++j)
+          free(links[j].url);
+     bf_scheduler_update_stop(sch);
+     bf_scheduler_delete(sch);
+     hits_scorer_delete(scorer);
      page_db_delete(db);
 }
 
@@ -842,7 +913,8 @@ CuSuite *
 test_bf_scheduler_suite(void) {
      CuSuite *suite = CuSuiteNew();
      SUITE_ADD_TEST(suite, test_bf_scheduler_requests);
-     SUITE_ADD_TEST(suite, test_bf_scheduler_large);
+     SUITE_ADD_TEST(suite, test_bf_scheduler_large_page_rank);
+     SUITE_ADD_TEST(suite, test_bf_scheduler_large_hits);
 
      return suite;
 }
