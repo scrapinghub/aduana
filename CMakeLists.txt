@@ -38,6 +38,7 @@ add_library(pagedb SHARED
   src/bf_scheduler.c
   src/util.c
   src/page_rank_scorer.c
+  src/hits_scorer.c
   src/txn_manager.c
 )
 include_directories(src)

@@ -68,7 +68,6 @@ on_error:
      page_rank_scorer_set_error(prs,  page_rank_scorer_error_internal, __func__);
      page_rank_scorer_add_error(prs, error1);
      page_rank_scorer_add_error(prs, error2);
-     printf("%s\n", prs->error.message);
      return prs->error.code;
 }
 

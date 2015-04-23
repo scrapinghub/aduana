@@ -6,7 +6,6 @@
 #include "scorer.h"
 #include "util.h"
 
-#define PAGE_RANK_SCORER_MAX_ERROR_LENGTH 10000
 typedef enum {
      page_rank_scorer_error_ok = 0,
      page_rank_scorer_error_memory,

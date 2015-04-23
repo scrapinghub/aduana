@@ -337,3 +337,31 @@ hits_compute(Hits *hits,
      }
      return 0;
 }
+
+HitsError
+hits_get_hub(const Hits *pr,
+             size_t idx,
+             float *score_old,
+             float *score_new) {
+     float *h_score_new = mmap_array_idx(pr->h1, idx);
+     float *h_score_old = mmap_array_idx(pr->h2, idx);
+     if (!h_score_new || !h_score_old)
+          return hits_error_internal;
+     *score_new = *h_score_new;
+     *score_old = *h_score_old;
+     return 0;
+}
+
+HitsError
+hits_get_authority(const Hits *pr,
+                   size_t idx,
+                   float *score_old,
+                   float *score_new) {
+     float *a_score_new = mmap_array_idx(pr->a1, idx);
+     float *a_score_old = mmap_array_idx(pr->a2, idx);
+     if (!a_score_new || !a_score_old)
+          return hits_error_internal;
+     *score_new = *a_score_new;
+     *score_old = *a_score_old;
+     return 0;
+}

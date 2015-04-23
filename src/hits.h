@@ -56,4 +56,16 @@ hits_compute(Hits *hits,
              LinkStreamNextFunc *link_stream_next,
              LinkStreamResetFunc *link_stream_reset);
 
+HitsError
+hits_get_hub(const Hits *pr,
+             size_t idx,
+             float *score_old,
+             float *score_new);
+
+HitsError
+hits_get_authority(const Hits *pr,
+                   size_t idx,
+                   float *score_old,
+                   float *score_new);
+
 #endif // _HITS_H
