@@ -17,7 +17,7 @@ typedef struct {
      Hits *hits;
      PageDB *page_db;
 
-     Error error;
+     Error *error;
 } HitsScorer;
 
 HitsScorerError

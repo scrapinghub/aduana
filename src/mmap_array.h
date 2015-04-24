@@ -23,7 +23,7 @@ typedef struct {
      size_t n_elements;    /**< Number of elements */
      size_t element_size;  /**< Size of each element */
 
-     Error error;
+     Error *error;
 } MMapArray;
 
 /** Create a new MMapArray

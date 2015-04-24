@@ -62,12 +62,12 @@ schedule_entry_mdb_cmp(const MDB_val *a, const MDB_val *b) {
 
 static void
 bf_scheduler_set_error(BFScheduler *sch, int code, const char *message) {
-     error_set(&sch->error, code, message);
+     error_set(sch->error, code, message);
 }
 
 static void
 bf_scheduler_add_error(BFScheduler *sch, const char *message) {
-     error_add(&sch->error, message);
+     error_add(sch->error, message);
 }
 
 BFSchedulerError
@@ -75,8 +75,10 @@ bf_scheduler_new(BFScheduler **sch, PageDB *db) {
      BFScheduler *p = *sch = malloc(sizeof(*p));
      if (!p)
           return bf_scheduler_error_memory;
-
-     error_init(&p->error);
+     if (!(p->error = error_new())) {
+          free(p);
+          return bf_scheduler_error_memory;
+     }
 
      p->scorer.state = 0;
      p->scorer.add = 0;
@@ -114,15 +116,15 @@ bf_scheduler_new(BFScheduler **sch, PageDB *db) {
      if (error != 0) {
           bf_scheduler_set_error(p, bf_scheduler_error_invalid_path, __func__);
           bf_scheduler_add_error(p, error);
-          return p->error.code;
+          return p->error->code;
      }
 
      if (txn_manager_new(&p->txn_manager, 0) != 0) {
           bf_scheduler_set_error(p, bf_scheduler_error_internal, __func__);
           bf_scheduler_add_error(p, p->txn_manager?
-                                 p->txn_manager->error.message:
+                                 p->txn_manager->error->message:
                                  "NULL");
-          return p->error.code;
+          return p->error->code;
      }
 
      // initialize LMDB on the directory
@@ -143,7 +145,7 @@ bf_scheduler_new(BFScheduler **sch, PageDB *db) {
           bf_scheduler_set_error(p, bf_scheduler_error_internal, __func__);
           bf_scheduler_add_error(p, error);
           bf_scheduler_add_error(p, mdb_strerror(rc));
-          return p->error.code;
+          return p->error->code;
      }
 
      return 0;
@@ -167,15 +169,15 @@ static BFSchedulerError
 bf_scheduler_expand(BFScheduler *sch) {
      if (txn_manager_expand(sch->txn_manager) != 0) {
           bf_scheduler_set_error(sch, bf_scheduler_error_internal, __func__);
-          bf_scheduler_add_error(sch, sch->txn_manager->error.message);
+          bf_scheduler_add_error(sch, sch->txn_manager->error->message);
      }
-     return sch->error.code;
+     return sch->error->code;
 }
 
 BFSchedulerError
 bf_scheduler_add(BFScheduler *sch, const CrawledPage *page) {
      if (bf_scheduler_expand(sch) != 0)
-          return sch->error.code;
+          return sch->error->code;
 
      char *error1 = 0;
      char *error2 = 0;
@@ -186,7 +188,7 @@ bf_scheduler_add(BFScheduler *sch, const CrawledPage *page) {
      PageInfoList *pil;
      if (page_db_add(sch->page_db, page, &pil) != 0) {
           error1 = "adding crawled page";
-          error2 = sch->page_db->error.message;
+          error2 = sch->page_db->error->message;
           goto on_error;
      }
 
@@ -208,7 +210,7 @@ bf_scheduler_add(BFScheduler *sch, const CrawledPage *page) {
 
      if (txn_manager_begin(sch->txn_manager, 0, &txn) != 0) {
           error1 = "starting transaction";
-          error2 = sch->txn_manager->error.message;
+          error2 = sch->txn_manager->error->message;
           goto on_error;
      }
      int mdb_rc = bf_scheduler_open_cursor(txn, &cur);
@@ -246,7 +248,7 @@ bf_scheduler_add(BFScheduler *sch, const CrawledPage *page) {
      }
      if (txn_manager_commit(sch->txn_manager, txn) != 0) {
           error1 = "commiting schedule transaction";
-          error2 = sch->txn_manager->error.message;
+          error2 = sch->txn_manager->error->message;
           goto on_error;
      }
      page_info_list_delete(pil);
@@ -260,7 +262,7 @@ on_error:
      bf_scheduler_set_error(sch, bf_scheduler_error_internal, __func__);
      bf_scheduler_add_error(sch, error1);
      bf_scheduler_add_error(sch, error2);
-     return sch->error.code;
+     return sch->error->code;
 }
 
 static BFSchedulerError
@@ -307,7 +309,7 @@ on_error:
      bf_scheduler_set_error(sch, bf_scheduler_error_internal, __func__);
      bf_scheduler_add_error(sch, error1);
      bf_scheduler_add_error(sch, error2);
-     return sch->error.code;
+     return sch->error->code;
 }
 
 
@@ -316,7 +318,7 @@ bf_scheduler_update_batch(BFScheduler *sch) {
      assert(sch->scorer.state != 0);
 
      if (bf_scheduler_expand(sch) != 0)
-          return sch->error.code;
+          return sch->error->code;
 
      char *error1 = 0;
      char *error2 = 0;
@@ -329,14 +331,14 @@ bf_scheduler_update_batch(BFScheduler *sch) {
      if (!sch->stream &&
          (hashidx_stream_new(&sch->stream, sch->page_db) != 0)) {
                error1 = "creating Hash/Index stream";
-               error2 = sch->page_db->error.message;
+               error2 = sch->page_db->error->message;
                goto on_error;
      }
 
      // create new read/write transaction and cursor inside the schedule
      if (txn_manager_begin(sch->txn_manager, 0, &txn) != 0) {
           error1 = "starting transaction";
-          error2 = sch->txn_manager->error.message;
+          error2 = sch->txn_manager->error->message;
           goto on_error;
      }
      int mdb_rc = bf_scheduler_open_cursor(txn, &cur);
@@ -364,7 +366,7 @@ bf_scheduler_update_batch(BFScheduler *sch) {
                    (bf_scheduler_change_score(sch, cur, hash, score_old, score_new) != 0)) {
                     hashidx_stream_delete(sch->stream);
                     txn_manager_abort(sch->txn_manager, txn);
-                    return sch->error.code;
+                    return sch->error->code;
                }
                break;
           case stream_state_end:
@@ -381,7 +383,7 @@ bf_scheduler_update_batch(BFScheduler *sch) {
 
      if (txn_manager_commit(sch->txn_manager, txn) != 0) {
           error1 = "commiting schedule transaction";
-          error2 = sch->txn_manager->error.message;
+          error2 = sch->txn_manager->error->message;
           goto on_error;
      }
      txn = 0;
@@ -396,7 +398,7 @@ on_error:
      bf_scheduler_set_error(sch, bf_scheduler_error_internal, __func__);
      bf_scheduler_add_error(sch, error1);
      bf_scheduler_add_error(sch, error2);
-     return sch->error.code;
+     return sch->error->code;
 }
 
 static BFSchedulerError
@@ -404,11 +406,11 @@ bf_scheduler_update_step(BFScheduler *sch) {
      if (sch->scorer.update(sch->scorer.state) != 0) {
           bf_scheduler_set_error(sch, bf_scheduler_error_internal, __func__);
           bf_scheduler_add_error(sch, "updating scorer");
-          return sch->error.code;
+          return sch->error->code;
      }
      do {
           if (bf_scheduler_update_batch(sch) != 0)
-               return sch->error.code;
+               return sch->error->code;
      } while (sch->stream);
      return 0;
 }
@@ -421,7 +423,7 @@ bf_scheduler_mutex_lock(BFScheduler *sch) {
           bf_scheduler_add_error(sch, "locking update thread mutex");
           bf_scheduler_add_error(sch, strerror(rc));
      }
-     return sch->error.code;
+     return sch->error->code;
 }
 
 static BFSchedulerError
@@ -432,13 +434,13 @@ bf_scheduler_mutex_unlock(BFScheduler *sch) {
           bf_scheduler_add_error(sch, "unlocking update thread mutex");
           bf_scheduler_add_error(sch, strerror(rc));
      }
-     return sch->error.code;
+     return sch->error->code;
 }
 
 static BFSchedulerError
 bf_scheduler_update_finished(BFScheduler *sch, int *stop) {
      if (bf_scheduler_mutex_lock(sch) != 0)
-          return sch->error.code;
+          return sch->error->code;
 
      if (sch->update_state == update_thread_stopped)
           sch->update_state = update_thread_finished;
@@ -516,7 +518,7 @@ bf_scheduler_update_start(BFScheduler *sch) {
                     bf_scheduler_set_error(sch, bf_scheduler_error_thread, __func__);
                     bf_scheduler_add_error(sch, "creating thread");
                     bf_scheduler_add_error(sch, strerror(rc));
-                    return sch->error.code;
+                    return sch->error->code;
                }
           case update_thread_stopped:
                sch->update_state = update_thread_working;
@@ -555,7 +557,7 @@ bf_scheduler_update_stop(BFScheduler *sch) {
                }
                bf_scheduler_mutex_unlock(sch);
           }
-     return sch->error.code;
+     return sch->error->code;
 }
 
 BFSchedulerError
@@ -568,7 +570,7 @@ bf_scheduler_request(BFScheduler *sch, size_t n_pages, PageRequest **request) {
 
      if (txn_manager_begin(sch->txn_manager, 0, &txn) != 0) {
           error1 = "starting transaction";
-          error2 = sch->txn_manager->error.message;
+          error2 = sch->txn_manager->error->message;
           goto on_error;
      }
 
@@ -605,7 +607,7 @@ bf_scheduler_request(BFScheduler *sch, size_t n_pages, PageRequest **request) {
                     break;
                default:
                     error1 = "retrieving PageInfo from PageDB";
-                    error2 = sch->page_db->error.message;
+                    error2 = sch->page_db->error->message;
                     goto on_error;
                     break;
                }
@@ -628,7 +630,7 @@ bf_scheduler_request(BFScheduler *sch, size_t n_pages, PageRequest **request) {
 all_pages_retrieved:
      if (txn_manager_commit(sch->txn_manager, txn) != 0) {
           error1 = "commiting schedule transaction";
-          error2 = sch->txn_manager->error.message;
+          error2 = sch->txn_manager->error->message;
           goto on_error;
      }
      return 0;
@@ -638,7 +640,7 @@ on_error:
      bf_scheduler_add_error(sch, error1);
      bf_scheduler_add_error(sch, error2);
 
-     return sch->error.code;
+     return sch->error->code;
 }
 
 /** Close scheduler */
@@ -662,7 +664,7 @@ bf_scheduler_delete(BFScheduler *sch) {
           remove(sch->path);
      }
      free(sch->path);
-     error_destroy(&sch->error);
+     error_delete(sch->error);
      free(sch);
 }
 
@@ -676,13 +678,13 @@ test_bf_scheduler_requests(CuTest *tc) {
 
      PageDB *db;
      CuAssert(tc,
-              db!=0? db->error.message: "NULL",
+              db!=0? db->error->message: "NULL",
               page_db_new(&db, test_dir_db) == 0);
      db->persist = 0;
 
      BFScheduler *sch;
      CuAssert(tc,
-              sch != 0? sch->error.message: "NULL",
+              sch != 0? sch->error->message: "NULL",
               bf_scheduler_new(&sch, db) == 0);
      sch->persist = 0;
 
@@ -745,7 +747,7 @@ test_bf_scheduler_requests(CuTest *tc) {
       */
      for (size_t i=0; i<n_pages; ++i) {
           CuAssert(tc,
-                   sch->error.message,
+                   sch->error->message,
                    bf_scheduler_add(sch, crawl[i]) == 0);
           crawled_page_delete(crawl[i]);
      }
@@ -761,7 +763,7 @@ test_bf_scheduler_requests(CuTest *tc) {
       */
      PageRequest *req;
      CuAssert(tc,
-              sch->error.message,
+              sch->error->message,
               bf_scheduler_request(sch, 2, &req) == 0);
 
      CuAssertStrEquals(tc, "9", req->urls[0]);
@@ -769,7 +771,7 @@ test_bf_scheduler_requests(CuTest *tc) {
      page_request_delete(req);
 
      CuAssert(tc,
-              sch->error.message,
+              sch->error->message,
               bf_scheduler_request(sch, 4, &req) == 0);
 
      CuAssertStrEquals(tc, "6", req->urls[0]);
@@ -790,19 +792,19 @@ test_bf_scheduler_large_page_rank(CuTest *tc) {
 
      PageDB *db;
      CuAssert(tc,
-              db!=0? db->error.message: "NULL",
+              db!=0? db->error->message: "NULL",
               page_db_new(&db, test_dir_db) == 0);
      db->persist = 0;
 
      BFScheduler *sch;
      CuAssert(tc,
-              sch != 0? sch->error.message: "NULL",
+              sch != 0? sch->error->message: "NULL",
               bf_scheduler_new(&sch, db) == 0);
      sch->persist = 0;
 
      PageRankScorer *scorer;
      CuAssert(tc,
-              scorer != 0? scorer->error.message: "NULL",
+              scorer != 0? scorer->error->message: "NULL",
               page_rank_scorer_new(&scorer, db) == 0);
 
      page_rank_scorer_setup(scorer, &sch->scorer);
@@ -822,10 +824,10 @@ test_bf_scheduler_large_page_rank(CuTest *tc) {
      for (size_t i=0; i<n_pages; ++i) {
 #if 1
           if (i % 10000 == 0) {
-               size_t delta = (size_t)difftime(time(0), start);
+               double delta = difftime(time(0), start);
                if (delta > 0) {
-                    printf("%10zuK/%zuM: %9zu pages/sec\n", 
-                           i/1000, n_pages/1000000, i/delta);
+                    printf("%10zuK/%zuM: %9zu pages/sec\n",
+                           i/1000, n_pages/1000000, i/((size_t)delta));
                }
           }
 #endif
@@ -840,14 +842,14 @@ test_bf_scheduler_large_page_rank(CuTest *tc) {
                crawled_page_add_link(cp, links[j].url, 0.5);
 
           CuAssert(tc,
-                   sch->error.message,
+                   sch->error->message,
                    bf_scheduler_add(sch, cp) == 0);
           crawled_page_delete(cp);
 
           if (i % 10 == 0) {
                PageRequest *req;
                CuAssert(tc,
-                        sch->error.message,
+                        sch->error->message,
                         bf_scheduler_request(sch, 10, &req) == 0);
                page_request_delete(req);
           }
@@ -869,19 +871,19 @@ test_bf_scheduler_large_hits(CuTest *tc) {
 
      PageDB *db;
      CuAssert(tc,
-              db!=0? db->error.message: "NULL",
+              db!=0? db->error->message: "NULL",
               page_db_new(&db, test_dir_db) == 0);
      db->persist = 0;
 
      BFScheduler *sch;
      CuAssert(tc,
-              sch != 0? sch->error.message: "NULL",
+              sch != 0? sch->error->message: "NULL",
               bf_scheduler_new(&sch, db) == 0);
      sch->persist = 0;
 
      HitsScorer *scorer;
      CuAssert(tc,
-              scorer != 0? scorer->error.message: "NULL",
+              scorer != 0? scorer->error->message: "NULL",
               hits_scorer_new(&scorer, db) == 0);
 
      hits_scorer_setup(scorer, &sch->scorer);
@@ -901,10 +903,10 @@ test_bf_scheduler_large_hits(CuTest *tc) {
      for (size_t i=0; i<n_pages; ++i) {
 #if 1
           if (i % 10000 == 0) {
-               size_t delta = (size_t)difftime(time(0), start);
+               double delta = difftime(time(0), start);
                if (delta > 0) {
-                    printf("%10zuK/%zuM: %9zu pages/sec\n", 
-                           i/1000, n_pages/1000000, i/delta);
+                    printf("%10zuK/%zuM: %9zu pages/sec\n",
+                           i/1000, n_pages/1000000, i/((size_t)delta));
                }
           }
 #endif
@@ -919,14 +921,14 @@ test_bf_scheduler_large_hits(CuTest *tc) {
                crawled_page_add_link(cp, links[j].url, 0.5);
 
           CuAssert(tc,
-                   sch->error.message,
+                   sch->error->message,
                    bf_scheduler_add(sch, cp) == 0);
           crawled_page_delete(cp);
 
           if (i % 10 == 0) {
                PageRequest *req;
                CuAssert(tc,
-                        sch->error.message,
+                        sch->error->message,
                         bf_scheduler_request(sch, 10, &req) == 0);
                page_request_delete(req);
           }

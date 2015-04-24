@@ -26,7 +26,7 @@ typedef struct {
      char *path_out_degree;
      char *path_pr;
 
-     Error error;
+     Error *error;
 
 // Options
 // -----------------------------------------------------------------------------

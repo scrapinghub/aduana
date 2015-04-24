@@ -17,7 +17,7 @@ typedef struct {
      PageRank *page_rank;
      PageDB *page_db;
 
-     Error error;
+     Error *error;
 } PageRankScorer;
 
 PageRankScorerError

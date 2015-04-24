@@ -46,6 +46,14 @@ error_init(Error *error);
 void
 error_destroy(Error *error);
 
+/** Allocate and initialize a new error structure */
+Error *
+error_new(void);
+
+/** Destroy and free an error structure */
+void
+error_delete(Error *error);
+
 /** Set error.
  *
  * If an error is already present then do nothing. If you want to overwrite an

@@ -63,7 +63,7 @@ typedef struct {
       **/
      HashIdxStream *stream;
 
-     Error error;
+     Error *error;
 
 // Update thread
 // -----------------------------------------------------------------------------

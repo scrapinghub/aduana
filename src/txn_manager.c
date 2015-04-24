@@ -104,15 +104,18 @@ txn_manager_new(TxnManager **tm, MDB_env *env) {
      if (!p)
           return txn_manager_error_memory;
 
-     error_init(&p->error);
+     if (!(p->error = error_new())) {
+          free(p);
+          return txn_manager_error_memory;
+     }
 
      p->env = env;
      if (inv_semaphore_init(&p->txn_counter_read) != 0)
-          error_set(&p->error, txn_manager_error_thread, "creating read txn counter");
+          error_set(p->error, txn_manager_error_thread, "creating read txn counter");
      else if (inv_semaphore_init(&p->txn_counter_write) != 0)
-          error_set(&p->error, txn_manager_error_thread, "creating write txn counter");
+          error_set(p->error, txn_manager_error_thread, "creating write txn counter");
 
-     return p->error.code;
+     return p->error->code;
 }
 
 TxnManagerError
@@ -121,19 +124,19 @@ txn_manager_begin(TxnManager *tm, int flags, MDB_txn **txn) {
           flags & MDB_RDONLY? &tm->txn_counter_read: &tm->txn_counter_write;
 
      if (inv_semaphore_inc(counter) != 0) {
-          error_set(&tm->error, txn_manager_error_thread, __func__);
-          error_add(&tm->error, "incrementing txn counter");
-          return tm->error.code;
+          error_set(tm->error, txn_manager_error_thread, __func__);
+          error_add(tm->error, "incrementing txn counter");
+          return tm->error->code;
      }
      int mdb_rc = mdb_txn_begin(tm->env, 0, flags, txn);
      if (mdb_rc != 0) {
-          error_set(&tm->error, txn_manager_error_mdb, __func__);
-          error_add(&tm->error, "beginning new transaction");
-          error_add(&tm->error, mdb_strerror(mdb_rc));
+          error_set(tm->error, txn_manager_error_mdb, __func__);
+          error_add(tm->error, "beginning new transaction");
+          error_add(tm->error, mdb_strerror(mdb_rc));
 
           txn_manager_abort(tm, *txn);
      }
-     return tm->error.code;
+     return tm->error->code;
 }
 
 TxnManagerError
@@ -144,16 +147,16 @@ txn_manager_commit(TxnManager *tm, MDB_txn *txn) {
 
      int mdb_rc = mdb_txn_commit(txn);
      if (mdb_rc != 0) {
-          error_set(&tm->error, txn_manager_error_mdb, __func__);
-          error_add(&tm->error, "commiting new transaction");
-          error_add(&tm->error, mdb_strerror(mdb_rc));
+          error_set(tm->error, txn_manager_error_mdb, __func__);
+          error_add(tm->error, "commiting new transaction");
+          error_add(tm->error, mdb_strerror(mdb_rc));
 
           txn_manager_abort(tm, txn);
      } else if (inv_semaphore_dec(counter) != 0) {
-          error_set(&tm->error, txn_manager_error_thread, __func__);
-          error_add(&tm->error, "decrementing txn counter");
+          error_set(tm->error, txn_manager_error_thread, __func__);
+          error_add(tm->error, "decrementing txn counter");
      }
-     return tm->error.code;
+     return tm->error->code;
 }
 
 TxnManagerError
@@ -164,32 +167,32 @@ txn_manager_abort(TxnManager *tm, MDB_txn *txn) {
 
      mdb_txn_abort(txn);
      if (inv_semaphore_dec(counter) != 0) {
-          error_set(&tm->error, txn_manager_error_thread, __func__);
-          error_add(&tm->error, "decrementing txn counter");
+          error_set(tm->error, txn_manager_error_thread, __func__);
+          error_add(tm->error, "decrementing txn counter");
      }
-     return tm->error.code;
+     return tm->error->code;
 }
 
 TxnManagerError
 txn_manager_delete(TxnManager *tm) {
      if (inv_semaphore_count(&tm->txn_counter_read) != 0) {
-          error_set(&tm->error, txn_manager_error_internal, __func__);
-          error_add(&tm->error, "read transactions still active");
+          error_set(tm->error, txn_manager_error_internal, __func__);
+          error_add(tm->error, "read transactions still active");
      } else if (inv_semaphore_count(&tm->txn_counter_write) != 0) {
-          error_set(&tm->error, txn_manager_error_internal, __func__);
-          error_add(&tm->error, "write transactions still active");
+          error_set(tm->error, txn_manager_error_internal, __func__);
+          error_add(tm->error, "write transactions still active");
      } else if (inv_semaphore_destroy(&tm->txn_counter_read) != 0) {
-          error_set(&tm->error, txn_manager_error_thread, __func__);
-          error_add(&tm->error, "destroying read txn counter");
+          error_set(tm->error, txn_manager_error_thread, __func__);
+          error_add(tm->error, "destroying read txn counter");
      } else if (inv_semaphore_destroy(&tm->txn_counter_write) != 0) {
-          error_set(&tm->error, txn_manager_error_thread, __func__);
-          error_add(&tm->error, "destroying write txn counter");
+          error_set(tm->error, txn_manager_error_thread, __func__);
+          error_add(tm->error, "destroying write txn counter");
      } else {
-          error_destroy(&tm->error);
+          error_delete(tm->error);
           free(tm);
           return 0;
      }
-     return tm->error.code;
+     return tm->error->code;
 }
 
 
@@ -233,14 +236,14 @@ txn_manager_expand(TxnManager *tm) {
      if ((rc = inv_semaphore_release(&tm->txn_counter_write)) != 0)
           ERROR("releasing write counter", error_thread);
 
-     return tm->error.code;
+     return tm->error->code;
 error_thread:
-     error_set(&tm->error, txn_manager_error_thread, __func__);
-     error_add(&tm->error, error);
-     error_add(&tm->error, strerror(rc));
+     error_set(tm->error, txn_manager_error_thread, __func__);
+     error_add(tm->error, error);
+     error_add(tm->error, strerror(rc));
 error_mdb:
-     error_set(&tm->error, txn_manager_error_mdb, __func__);
-     error_add(&tm->error, error);
-     error_add(&tm->error, mdb_strerror(rc));
-     return tm->error.code;
+     error_set(tm->error, txn_manager_error_mdb, __func__);
+     error_add(tm->error, error);
+     error_add(tm->error, mdb_strerror(rc));
+     return tm->error->code;
 }

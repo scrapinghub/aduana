@@ -28,7 +28,7 @@ typedef struct {
 
      size_t n_pages;
 
-     Error error;
+     Error *error;
 
 // Options
 // -----------------------------------------------------------------------------

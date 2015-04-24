@@ -93,7 +93,7 @@ typedef struct {
      InvSemaphore txn_counter_read;  /**< Counter of read transactions */
      InvSemaphore txn_counter_write; /**< Counter of write transactions */
 
-     Error error;
+     Error *error;
 } TxnManager;
 
 /** Allocate a new TxnManager */

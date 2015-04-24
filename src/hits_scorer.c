@@ -11,12 +11,12 @@
 
 static void
 hits_scorer_set_error(HitsScorer *hs, int code, const char *message) {
-     error_set(&hs->error, code, message);
+     error_set(hs->error, code, message);
 }
 
 static void
 hits_scorer_add_error(HitsScorer *hs, const char *message) {
-     error_add(&hs->error, message);
+     error_add(hs->error, message);
 }
 
 HitsScorerError
@@ -24,15 +24,18 @@ hits_scorer_new(HitsScorer **hs, PageDB *db) {
      HitsScorer *p = *hs = malloc(sizeof(*p));
      if (!p)
           return hits_scorer_error_memory;
-
-     error_init(&p->error);
+     p->error = error_new();
+     if (p->error == 0) {
+          free(p);
+          return hits_scorer_error_memory;
+     }
 
      p->page_db = db;
      if (hits_new(&p->hits, db->path, 1000) != 0) {
           hits_scorer_set_error(p, hits_scorer_error_internal, __func__);
           hits_scorer_add_error(p, "initializing HITS");
-          hits_scorer_add_error(p, p? p->error.message: "NULL");
-          return p->error.code;
+          hits_scorer_add_error(p, p? p->error->message: "NULL");
+          return p->error->code;
      }
 
      return 0;
@@ -57,7 +60,7 @@ hits_scorer_update(void *state) {
                            page_db_link_stream_next,
                            page_db_link_stream_reset) != 0) {
           error1 = "computing HITS";
-          error2 = hs->hits->error.message;
+          error2 = hs->hits->error->message;
           goto on_error;
      }
      page_db_link_stream_delete(st);
@@ -68,7 +71,7 @@ on_error:
      hits_scorer_set_error(hs,  hits_scorer_error_internal, __func__);
      hits_scorer_add_error(hs, error1);
      hits_scorer_add_error(hs, error2);
-     return hs->error.code;
+     return hs->error->code;
 }
 
 int
@@ -89,11 +92,11 @@ hits_scorer_delete(HitsScorer *hs) {
           hits_scorer_set_error(hs,  hits_scorer_error_internal, __func__);
           hits_scorer_add_error(hs, "deleting HITS");
           hits_scorer_add_error(hs,
-                                hs->hits? hs->hits->error.message
+                                hs->hits? hs->hits->error->message
                                 : "unknown error");
-          return hs->error.code;
+          return hs->error->code;
      }
-     error_destroy(&hs->error);
+     error_delete(hs->error);
      free(hs);
      return 0;
 }

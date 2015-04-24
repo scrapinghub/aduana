@@ -19,6 +19,7 @@
 #include "txn_manager.h"
 #include "util.h"
 
+/** Allocate a new structure, with an initial default number of @ref LinkInfo slots*/
 static PageLinks *
 page_links_new(void) {
      PageLinks *pl = malloc(sizeof(*pl));
@@ -35,6 +36,7 @@ page_links_new(void) {
      return pl;
 }
 
+/** Delete structure and all @ref LinkInfo inside */
 static void
 page_links_delete(PageLinks *pl) {
      if (pl) {
@@ -45,8 +47,15 @@ page_links_delete(PageLinks *pl) {
      }
 }
 
+/** Add a new @ref LinkInfo inside.
+ *
+ * Makes a copy of the URL.
+ *
+ * @return 0 if success, -1 if failure
+ * */
 static int
 page_links_add_link(PageLinks *pl, const char *url, float score) {
+     // Each time we hit the limit we double reserved space
      if (pl->n_links == pl->m_links) {
           void *p = realloc(pl->link_info, 2*pl->m_links);
           if (!p)
@@ -256,6 +265,7 @@ page_info_dump(const PageInfo *pi, MDB_val *val) {
           sizeof(pi->first_crawl) + sizeof(pi->last_crawl) + sizeof(pi->n_changes) +
           sizeof(pi->n_crawls) + sizeof(pi->score) + sizeof(pi->content_hash_length) + url_size +
           pi->content_hash_length;
+
      char *data = val->mv_data = malloc(val->mv_size);
      if (!data)
           return -1;
@@ -276,11 +286,6 @@ page_info_dump(const PageInfo *pi, MDB_val *val) {
      return 0;
 }
 
-/** Create a new PageInfo loading the information from a previously
- * dumped PageInfo inside val.
- *
- * @return pointer to the new PageInfo or NULL if failure
- */
 PageInfo *
 page_info_load(const MDB_val *val) {
      PageInfo *pi = malloc(sizeof(*pi));
@@ -382,7 +387,7 @@ page_db_hash(const char *url) {
      return XXH64(url, strlen(url), 0);
 }
 
-int
+static int
 page_db_open_cursor(MDB_txn *txn,
                     const char *db_name,
                     int flags,
@@ -398,25 +403,25 @@ page_db_open_cursor(MDB_txn *txn,
      return mdb_rc;
 }
 
-int
+static int
 page_db_open_hash2info(MDB_txn *txn, MDB_cursor **cursor) {
      return page_db_open_cursor(
           txn, "hash2info", MDB_INTEGERKEY, cursor, 0);
 }
 
-int
+static int
 page_db_open_hash2idx(MDB_txn *txn, MDB_cursor **cursor) {
      return page_db_open_cursor(
           txn, "hash2idx", MDB_INTEGERKEY, cursor, 0);
 }
 
-int
+static int
 page_db_open_links(MDB_txn *txn, MDB_cursor **cursor) {
      return page_db_open_cursor(
           txn, "links", MDB_INTEGERKEY, cursor, 0);
 }
 
-int
+static int
 page_db_open_info(MDB_txn *txn, MDB_cursor **cursor) {
      return page_db_open_cursor(txn, "info", 0, cursor, 0);
 }
@@ -424,12 +429,12 @@ page_db_open_info(MDB_txn *txn, MDB_cursor **cursor) {
 
 static void
 page_db_set_error(PageDB *db, int code, const char *message) {
-     error_set(&db->error, code, message);
+     error_set(db->error, code, message);
 }
 
 static void
 page_db_add_error(PageDB *db, const char *message) {
-     error_add(&db->error, message);
+     error_add(db->error, message);
 }
 
 /** Doubles database size.
@@ -441,9 +446,9 @@ static PageDBError
 page_db_expand(PageDB *db) {
      if (txn_manager_expand(db->txn_manager) != 0) {
           page_db_set_error(db, page_db_error_internal, __func__);
-          page_db_add_error(db, db->txn_manager->error.message);
+          page_db_add_error(db, db->txn_manager->error->message);
      }
-     return db->error.code;
+     return db->error->code;
 }
 
 PageDBError
@@ -451,8 +456,12 @@ page_db_new(PageDB **db, const char *path) {
      PageDB *p = *db = malloc(sizeof(*p));
      if (p == 0)
           return page_db_error_memory;
-     error_init(&p->error);
 
+     p->error = error_new();
+     if (p->error == 0) {
+          free(p);
+          return page_db_error_memory;
+     }
      p->persist = PAGE_DB_DEFAULT_PERSIST;
 
      // create directory if not present yet
@@ -463,15 +472,15 @@ page_db_new(PageDB **db, const char *path) {
      if (error != 0) {
           page_db_set_error(p, page_db_error_invalid_path, __func__);
           page_db_add_error(p, error);
-          return p->error.code;
+          return p->error->code;
      }
 
      if (txn_manager_new(&p->txn_manager, 0) != 0) {
           page_db_set_error(p, page_db_error_internal, __func__);
           page_db_add_error(p, p->txn_manager?
-                            p->txn_manager->error.message:
+                            p->txn_manager->error->message:
                             "NULL");
-          return p->error.code;
+          return p->error->code;
      }
 
      // initialize LMDB on the directory
@@ -525,7 +534,7 @@ page_db_new(PageDB **db, const char *path) {
           case MDB_KEYEXIST:
           case 0:
                if (txn_manager_commit(p->txn_manager, txn) != 0)
-                    error = p->txn_manager->error.message;
+                    error = p->txn_manager->error->message;
                break; // we good
           default:
                error = "could not initialize info.n_pages";
@@ -540,7 +549,7 @@ page_db_new(PageDB **db, const char *path) {
           mdb_env_close(p->txn_manager->env);
      }
 
-     return p->error.code;
+     return p->error->code;
 }
 
 
@@ -646,7 +655,7 @@ PageDBError
 page_db_add(PageDB *db, const CrawledPage *page, PageInfoList **page_info_list) {
      // check if page should be expanded
      if (page_db_expand(db) != 0)
-          return db->error.code;
+          return db->error->code;
 
      MDB_txn *txn;
 
@@ -664,7 +673,7 @@ page_db_add(PageDB *db, const CrawledPage *page, PageInfoList **page_info_list) 
      // start a new write transaction
      txn = 0;
      if ((txn_manager_begin(db->txn_manager, 0, &txn)) != 0)
-          error = db->txn_manager->error.message;
+          error = db->txn_manager->error->message;
      else if ((mdb_rc = page_db_open_hash2info(txn, &cur_hash2info)) != 0)
           error = "opening hash2info cursor";
      else if ((mdb_rc = page_db_open_hash2idx(txn, &cur_hash2idx)) != 0)
@@ -773,10 +782,10 @@ page_db_add(PageDB *db, const CrawledPage *page, PageInfoList **page_info_list) 
      id = 0;
 
      if (txn_manager_commit(db->txn_manager, txn) != 0) {
-          error = db->txn_manager->error.message;
+          error = db->txn_manager->error->message;
           goto on_error;
      }
-     return db->error.code;
+     return db->error->code;
 
 on_error:
      if (id)
@@ -789,7 +798,7 @@ on_error:
      if (mdb_rc != 0)
           page_db_add_error(db, mdb_strerror(mdb_rc));
 
-     return db->error.code;
+     return db->error->code;
 
 }
 
@@ -801,7 +810,7 @@ page_db_get_info(PageDB *db, uint64_t hash, PageInfo **pi) {
      int mdb_rc;
      char *error = 0;
      if (txn_manager_begin(db->txn_manager, MDB_RDONLY, &txn) != 0)
-          error = db->txn_manager->error.message;
+          error = db->txn_manager->error->message;
      // open hash2info database
      else if ((mdb_rc = page_db_open_hash2info(txn, &cur)) != 0) {
           error = "opening hash2info database";
@@ -842,7 +851,7 @@ on_error:
      if (mdb_rc != 0)
           page_db_add_error(db, mdb_strerror(mdb_rc));
 
-     return db->error.code;
+     return db->error->code;
 }
 
 PageDBError
@@ -854,7 +863,7 @@ page_db_get_idx(PageDB *db, uint64_t hash, uint64_t *idx) {
      int ret = 0;
      char *error = 0;
      if (txn_manager_begin(db->txn_manager, MDB_RDONLY, &txn) != 0) {
-          error = db->txn_manager->error.message;
+          error = db->txn_manager->error->message;
           goto on_error;
      // open hash2info database
      } else if ((mdb_rc = page_db_open_hash2idx(txn, &cur)) != 0) {
@@ -897,29 +906,39 @@ on_error:
      if (mdb_rc != 0)
           page_db_add_error(db, mdb_strerror(mdb_rc));
 
-     return db->error.code;
+     return db->error->code;
 }
 
 /** Close database */
-void
+PageDBError
 page_db_delete(PageDB *db) {
+     if (!db)
+          return 0;
 
      mdb_env_close(db->txn_manager->env);
-     txn_manager_delete(db->txn_manager);
+     if (txn_manager_delete(db->txn_manager) != 0) {
+          page_db_set_error(db, page_db_error_internal, __func__);
+          page_db_add_error(db, "deleting transaction manager");
+          page_db_add_error(db, db->txn_manager->error->message);
+          return db->error->code;
+     }
 
      if (!db->persist) {
           char *data = build_path(db->path, "data.mdb");
           char *lock = build_path(db->path, "lock.mdb");
-          remove(data);
-          remove(lock);
+
+          // proceeed even the data files cannot be deleted from disk
+          (void)remove(data);
+          (void)remove(lock);
+          (void)remove(db->path);
+
           free(data);
           free(lock);
-
-          remove(db->path);
      }
      free(db->path);
-     error_destroy(&db->error);
+     error_delete(db->error);
      free(db);
+     return 0;
 }
 /// @}
 
@@ -957,7 +976,7 @@ page_db_link_stream_open_cursor(PageDBLinkStream *es) {
 
      // start a new read transaction
      if (txn_manager_begin(es->db->txn_manager, MDB_RDONLY, &txn) != 0) {
-          error = es->db->txn_manager->error.message;
+          error = es->db->txn_manager->error->message;
           goto mdb_error;
      }
      // open cursor to links database
@@ -987,7 +1006,7 @@ page_db_link_stream_open_cursor(PageDBLinkStream *es) {
           goto mdb_error;
 
      }
-     return es->db->error.code;
+     return es->db->error->code;
 
 mdb_error:
      es->state = stream_state_error;
@@ -1000,7 +1019,7 @@ mdb_error:
      if (mdb_rc != 0)
           page_db_add_error(es->db, mdb_strerror(mdb_rc));
 
-     return es->db->error.code;
+     return es->db->error->code;
 }
 
 PageDBError
@@ -1015,7 +1034,7 @@ page_db_link_stream_new(PageDBLinkStream **es, PageDB *db) {
           page_db_set_error(db, page_db_error_internal, __func__);
           page_db_add_error(db, "resetting link stream");
      }
-     return db->error.code;
+     return db->error->code;
 }
 
 StreamState
@@ -1091,7 +1110,7 @@ hashidx_stream_new(HashIdxStream **st, PageDB *db) {
 
      // start a new read transaction
      if (txn_manager_begin(db->txn_manager, MDB_RDONLY, &txn) != 0) {
-          error = db->txn_manager->error.message;
+          error = db->txn_manager->error->message;
           goto mdb_error;
      }
      // open cursor to links database
@@ -1112,7 +1131,7 @@ mdb_error:
      if (mdb_rc != 0)
           page_db_add_error(db, mdb_strerror(mdb_rc));
 
-     return db->error.code;
+     return db->error->code;
 }
 
 StreamState
@@ -1187,7 +1206,7 @@ test_page_db_simple(CuTest *tc) {
 
      PageDB *db;
      CuAssert(tc,
-              db!=0? db->error.message: "NULL",
+              db!=0? db->error->message: "NULL",
               page_db_new(&db, test_dir) == 0);
      db->persist = 0;
 
@@ -1206,18 +1225,18 @@ test_page_db_simple(CuTest *tc) {
 
      PageInfoList *pil;
      CuAssert(tc,
-              db->error.message,
+              db->error->message,
               page_db_add(db, cp1, &pil) == 0);
      page_info_list_delete(pil);
 
      CuAssert(tc,
-              db->error.message,
+              db->error->message,
               page_db_add(db, cp2, &pil) == 0);
      page_info_list_delete(pil);
 
      crawled_page_set_hash64(cp2, 3000);
      CuAssert(tc,
-              db->error.message,
+              db->error->message,
               page_db_add(db, cp2, &pil) == 0);
      page_info_list_delete(pil);
 
@@ -1229,7 +1248,7 @@ test_page_db_simple(CuTest *tc) {
      for (size_t i=0; i<3; ++i) {
           PageInfo *pi;
           CuAssert(tc,
-                   db->error.message,
+                   db->error->message,
                    page_db_get_info(db, page_db_hash(print_pages[i]), &pi) == 0);
 
           CuAssertPtrNotNull(tc, pi);
@@ -1262,7 +1281,7 @@ test_page_db_simple(CuTest *tc) {
 
      PageDBLinkStream *es;
      CuAssert(tc,
-              db->error.message,
+              db->error->message,
               page_db_link_stream_new(&es, db) == 0);
 
      if (es->state == stream_state_init) {
@@ -1310,7 +1329,7 @@ test_page_db_large(CuTest *tc) {
 
      PageDB *db;
      CuAssert(tc,
-              db!=0? db->error.message: "NULL",
+              db!=0? db->error->message: "NULL",
               page_db_new(&db, test_dir) == 0);
      db->persist = 0;
 
@@ -1327,10 +1346,10 @@ test_page_db_large(CuTest *tc) {
      for (size_t i=0; i<n_pages; ++i) {
 #if 1
           if (i % 10000 == 0) {
-               size_t delta = (size_t)difftime(time(0), start);
+               double delta = difftime(time(0), start);
                if (delta > 0) {
-                    printf("%10zuK/%zuM: %9zu pages/sec\n", 
-                           i/1000, n_pages/1000000, i/delta);
+                    printf("%10zuK/%zuM: %9zu pages/sec\n",
+                           i/1000, n_pages/1000000, i/((size_t)delta));
                }
           }
 #endif
@@ -1346,7 +1365,7 @@ test_page_db_large(CuTest *tc) {
 
           PageInfoList *pil;
           CuAssert(tc,
-                   db->error.message,
+                   db->error->message,
                    page_db_add(db, cp, &pil) == 0);
           page_info_list_delete(pil);
           crawled_page_delete(cp);
@@ -1356,24 +1375,24 @@ test_page_db_large(CuTest *tc) {
 
      PageDBLinkStream *st;
      CuAssert(tc,
-              db->error.message,
+              db->error->message,
               page_db_link_stream_new(&st, db) == 0);
 
      Hits *hits;
      CuAssert(tc,
-              hits!=0? hits->error.message: "NULL",
+              hits!=0? hits->error->message: "NULL",
               hits_new(&hits, test_dir, n_pages) == 0);
 
      hits->precision = 1e-3;
      CuAssert(tc,
-              hits->error.message,
+              hits->error->message,
               hits_compute(hits,
                            st,
                            page_db_link_stream_next,
                            page_db_link_stream_reset) == 0);
 
      CuAssert(tc,
-              hits->error.message,
+              hits->error->message,
               hits_delete(hits) == 0);
 
      page_db_link_stream_delete(st);
@@ -1408,7 +1427,7 @@ test_page_db_hits(CuTest *tc) {
 
      PageDB *db;
      CuAssert(tc,
-              db!=0? db->error.message: "NULL",
+              db!=0? db->error->message: "NULL",
               page_db_new(&db, test_dir) == 0);
      db->persist = 0;
 
@@ -1431,7 +1450,7 @@ test_page_db_hits(CuTest *tc) {
 
           PageInfoList *pil;
           CuAssert(tc,
-                   db->error.message,
+                   db->error->message,
                    page_db_add(db, cp, &pil) == 0);
           page_info_list_delete(pil);
           crawled_page_delete(cp);
@@ -1439,17 +1458,17 @@ test_page_db_hits(CuTest *tc) {
 
      PageDBLinkStream *st;
      CuAssert(tc,
-              db->error.message,
+              db->error->message,
               page_db_link_stream_new(&st, db) == 0);
 
      Hits *hits;
      CuAssert(tc,
-              hits!=0? hits->error.message: "NULL",
+              hits!=0? hits->error->message: "NULL",
               hits_new(&hits, test_dir, 5) == 0);
 
      hits->precision = 1e-8;
      CuAssert(tc,
-              hits->error.message,
+              hits->error->message,
               hits_compute(hits,
                            st,
                            page_db_link_stream_next,
@@ -1464,7 +1483,7 @@ test_page_db_hits(CuTest *tc) {
 
      for (int i=0; i<5; ++i) {
           CuAssert(tc,
-                   db->error.message,
+                   db->error->message,
                    page_db_get_idx(db, page_db_hash(urls[i]), &idx) == 0);
 
           CuAssertPtrNotNull(tc,
@@ -1476,7 +1495,7 @@ test_page_db_hits(CuTest *tc) {
           CuAssertDblEquals(tc, a_scores[i], *a_score, 1e-6);
      }
      CuAssert(tc,
-              hits->error.message,
+              hits->error->message,
               hits_delete(hits) == 0);
 
      page_db_delete(db);
@@ -1548,7 +1567,7 @@ test_page_db_page_rank(CuTest *tc) {
 
      PageDB *db;
      CuAssert(tc,
-              db!=0? db->error.message: "NULL",
+              db!=0? db->error->message: "NULL",
               page_db_new(&db, test_dir) == 0);
      db->persist = 0;
 
@@ -1571,7 +1590,7 @@ test_page_db_page_rank(CuTest *tc) {
           crawled_page_set_hash64(cp, i);
           PageInfoList *pil;
           CuAssert(tc,
-                   db->error.message,
+                   db->error->message,
                    page_db_add(db, cp, &pil) == 0);
           page_info_list_delete(pil);
           crawled_page_delete(cp);
@@ -1579,17 +1598,17 @@ test_page_db_page_rank(CuTest *tc) {
 
      PageDBLinkStream *st;
      CuAssert(tc,
-              db->error.message,
+              db->error->message,
               page_db_link_stream_new(&st, db) == 0);
 
      PageRank *pr;
      CuAssert(tc,
-              pr!=0? pr->error.message: "NULL",
+              pr!=0? pr->error->message: "NULL",
               page_rank_new(&pr, test_dir, 5) == 0);
 
      pr->precision = 1e-6;
      CuAssert(tc,
-              pr->error.message,
+              pr->error->message,
               page_rank_compute(pr,
                                 st,
                                 page_db_link_stream_next,
@@ -1602,7 +1621,7 @@ test_page_db_page_rank(CuTest *tc) {
      float scores[5] =  {0.15936255,  0.15936255,  0.15936255,  0.15936255,  0.3625498};
      for (int i=0; i<5; ++i) {
           CuAssert(tc,
-                   db->error.message,
+                   db->error->message,
                    page_db_get_idx(db, page_db_hash(urls[i]), &idx) == 0);
 
           CuAssertPtrNotNull(tc,
@@ -1611,7 +1630,7 @@ test_page_db_page_rank(CuTest *tc) {
           CuAssertDblEquals(tc, scores[i], *score, 1e-6);
      }
      CuAssert(tc,
-              pr->error.message,
+              pr->error->message,
               page_rank_delete(pr) == 0);
 
      page_db_delete(db);
@@ -1624,7 +1643,7 @@ test_hashidx_stream(CuTest *tc) {
 
      PageDB *db;
      CuAssert(tc,
-              db!=0? db->error.message: "NULL",
+              db!=0? db->error->message: "NULL",
               page_db_new(&db, test_dir) == 0);
      db->persist = 0;
 
@@ -1632,7 +1651,7 @@ test_hashidx_stream(CuTest *tc) {
      crawled_page_add_link(cp, "a", 0);
      crawled_page_add_link(cp, "b", 0);
      CuAssert(tc,
-              db->error.message,
+              db->error->message,
               page_db_add(db, cp, 0) == 0);
      crawled_page_delete(cp);
 
@@ -1640,13 +1659,13 @@ test_hashidx_stream(CuTest *tc) {
      crawled_page_add_link(cp, "c", 0);
      crawled_page_add_link(cp, "d", 0);
      CuAssert(tc,
-              db->error.message,
+              db->error->message,
               page_db_add(db, cp, 0) == 0);
      crawled_page_delete(cp);
 
      HashIdxStream *stream;
      CuAssert(tc,
-              db->error.message,
+              db->error->message,
               hashidx_stream_new(&stream, db) == 0);
 
      CuAssert(tc,

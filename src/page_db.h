@@ -57,7 +57,13 @@ typedef struct {
      size_t m_links;      /**< Maximum number of items that can be stored inside link_info */
 } PageLinks;
 
-/** The information that comes with a crawled page */
+/** The information that comes with a crawled page.
+ *
+ * We do not allocate any space for error handling since the operations are very
+ * simple. Functions return an int to signal the status, a 0 meaning success and -1
+ * meaning error. The only type of error possible is a memory error where a malloc or
+ * realloc has failed.
+ * */
 typedef struct {
      char *url;                   /**< ASCII, null terminated string for the page URL*/
      PageLinks *links;            /**< List of links inside this page */
@@ -76,7 +82,7 @@ typedef struct {
     - links: no links initially. Use crawled_page_add_link to add some.
     - time: current time
     - score: 0. It can be setted directly.
-    - content_hash: NULL. Use crawled_page_set_hash to change
+    - content_hash: NULL. Use @ref crawled_page_set_hash to change
 
     @return NULL if failure, otherwise a newly allocated CrawledPage
 */
@@ -167,8 +173,13 @@ page_info_print(const PageInfo *pi, char *out);
 
 /** Serialize the PageInfo into a contiguos block of memory.
  *
+ * Note that enough new memory will be allocated inside val.mv_data to contain
+ * the results of the dump. This memory should be freed when no longer is 
+ * necessary (for example after an mdb_cursor_put).
+ *
  * @param pi The PageInfo to be serialized
- * @param val The destination of the serialization
+ * @param val The destination of the serialization. Should have no memory
+ *            allocated inside mv_data since new memory will be allocated.
  *
  * @return 0 if success, -1 if failure.
  */
@@ -183,7 +194,8 @@ page_info_dump(const PageInfo *pi, MDB_val *val);
 PageInfo *
 page_info_load(const MDB_val *val);
 
-/** Estimate change rate of the given page */
+/** Estimate change rate of the given page. If no valid rate can be computed 
+ * return -1.0, otherwise a valid nonnegative change rate. */
 float
 page_info_rate(const PageInfo *pi);
 
@@ -191,19 +203,37 @@ page_info_rate(const PageInfo *pi);
 void
 page_info_delete(PageInfo *pi);
 
+/** A linked list of @ref PageInfo (and hash), to be returned by @ref page_db_add */
 struct PageInfoList {
-     uint64_t hash;
-     PageInfo *page_info;
+     uint64_t hash;        /**< Hash inside the hash2info database */
+     PageInfo *page_info;  /**< Info inside the hash2info database */
+     /** A pointer to the next element, or NULL */
      struct PageInfoList *next;
 };
 typedef struct PageInfoList PageInfoList;
 
+/** Create a new PageInfoList, with just one element.
+ *
+ * @param pi The @ref PageInfo to add. From this point it is the property of the list,
+ *           so deleting the list deletes this element.
+ * @param hash
+ *
+ * @return A pointer to the first element of the list, or NULL if failure
+ * */
 PageInfoList *
 page_info_list_new(PageInfo *pi, uint64_t hash);
 
+/** Add a new element to the head of the list.
+ * @param pi The @ref PageInfo to add. From this point it is the property of the list,
+ *           so deleting the list deletes this element.
+ * @param hash
+ *
+ * @return A pointer to the first element of the list, or NULL if failure
+ * */ 
 PageInfoList *
 page_info_list_cons(PageInfoList *pil, PageInfo *pi, uint64_t hash);
 
+/** Deletes the list and all its contents */
 void
 page_info_list_delete(PageInfoList *pil);
 
@@ -211,7 +241,6 @@ page_info_list_delete(PageInfoList *pil);
 
 /// @addtogroup PageDB
 /// @{
-#define PAGE_DB_MAX_ERROR_LENGTH 10000
 #define PAGE_DB_DEFAULT_SIZE 100*MB /**< Initial size of the mmap region */
 
 typedef enum {
@@ -229,7 +258,7 @@ typedef enum {
  * We are really talking about 4 diferent key/value databases:
  *   - info
  *        Contains fixed size information about the whole database. Right now
- *        it just contains the number pages stored.
+ *        it just contains the number of pages stored.
  *   - hash2idx
  *        Maps URL hash to index. Indices are consecutive identifier for every
  *        page. This allows to map pages to elements inside arrays.
@@ -240,10 +269,14 @@ typedef enum {
  *        of all links inside a database.
  */
 typedef struct {
+     /** Path to the database directory */
      char *path;
+     /** The transaction manager counts the number of read and write 
+         transactions active and is capable of safely performing a 
+         database resize */
      TxnManager* txn_manager;
 
-     Error error;
+     Error *error;
 
 // Options
 // -----------------------------------------------------------------------------     
@@ -259,9 +292,9 @@ page_db_hash(const char *url);
 
 /** Creates a new database and stores data inside path
  *
- * @param db In case of @ref ::page_db_error_memory *db could be NULL, otherwise
- *           it is allocated memory so that the @ref PageDB::error_msg can be
- *           accessed and its your responsability to call @ref page_db_delete.
+ * @param db In case of @ref ::page_db_error_memory *db could be NULL. In case of
+ *           other failures it is nevertheles allocated memory so that the error
+ *           code and message can be accessed.
  *
  * @param path Path to directory. In case it doesn't exist it will created.
  *             If it exists and a database is already present operations will
@@ -275,7 +308,7 @@ page_db_new(PageDB **db, const char *path);
 
 /** Update @ref PageDB with a new crawled page
  *
- * It perform the following actions:
+ * It performs the following actions:
  * - Compute page hash
  * - If the page is not already into the database:
  *     - It generates a new ID and stores it in hash2idx
@@ -290,6 +323,12 @@ page_db_new(PageDB **db, const char *path);
  * - Create or overwrite list of Page ID -> Links ID mapping inside links
  *   database
  *
+ * @param db The database to update
+ * @param page The information of the crawled page
+ * @param page_info_list If not NULL this function will allocate and populate a new 
+ *                       @ref PageInfoList which contains the @ref PageInfo of the updated pages. 
+ *                       It is your responsability to call @page_info_list_delete when you no
+ *                       longer need this structure.
  * @return 0 if success, otherwise the error code
  */
 PageDBError
@@ -307,28 +346,8 @@ page_db_get_info(PageDB *db, uint64_t hash, PageInfo **pi);
 PageDBError
 page_db_get_idx(PageDB *db, uint64_t hash, uint64_t *idx);
 
-/** Open a new cursor inside the database */
-int
-page_db_open_cursor(MDB_txn *txn,
-                    const char *db_name,
-                    int flags,
-                    MDB_cursor **cursor,
-                    MDB_cmp_func *func);
-
-int
-page_db_open_hash2info(MDB_txn *txn, MDB_cursor **cursor);
-
-int
-page_db_open_hash2idx(MDB_txn *txn, MDB_cursor **cursor);
-
-int
-page_db_open_links(MDB_txn *txn, MDB_cursor **cursor);
-
-int
-page_db_open_info(MDB_txn *txn, MDB_cursor **cursor);
-
-/** Close database */
-void
+/** Close database, delete files if it should not be persisted, and free memory */
+PageDBError
 page_db_delete(PageDB *db);
 /// @}
 

@@ -22,12 +22,12 @@
 
 static void
 hits_set_error(Hits *hits, int code, const char *message) {
-     error_set(&hits->error, code, message);
+     error_set(hits->error, code, message);
 }
 
 static void
 hits_add_error(Hits *hits, const char *message) {
-     error_add(&hits->error, message);
+     error_add(hits->error, message);
 }
 
 HitsError
@@ -35,13 +35,16 @@ hits_new(Hits **hits, const char *path, size_t max_vertices) {
      Hits *p = *hits = malloc(sizeof(*p));
      if (!p)
           return hits_error_memory;
+     if (!(p->error = error_new())) {
+          free(p);
+          return hits_error_memory;
+     }
      p->n_pages = 0;
 
      p->max_loops = HITS_DEFAULT_MAX_LOOPS;
      p->precision = HITS_DEFAULT_PRECISION;
      p->persist = HITS_DEFAULT_PERSIST;
 
-     error_init(&p->error);
 
      char *error1 = 0;
      char *error2 = 0;
@@ -60,22 +63,22 @@ hits_new(Hits **hits, const char *path, size_t max_vertices) {
      // and authorities in random order
      if (mmap_array_new(&p->h1, p->path_h1, max_vertices, sizeof(float)) != 0) {
           error1 = "building h1 mmap array";
-          error2 = p->h1? p->h1->error.message: "NULL";
+          error2 = p->h1? p->h1->error->message: "NULL";
           goto on_error;
      }
      if (mmap_array_new(&p->h2, p->path_h2, max_vertices, sizeof(float)) != 0) {
           error1 = "building h2 mmap array";
-          error2 = p->h2? p->h2->error.message: "NULL";
+          error2 = p->h2? p->h2->error->message: "NULL";
           goto on_error;
      }
      if (mmap_array_new(&p->a1, 0, max_vertices, sizeof(float)) != 0) {
           error1 = "building a1 mmap array";
-          error2 = p->a1? p->a1->error.message: "NULL";
+          error2 = p->a1? p->a1->error->message: "NULL";
           goto on_error;
      }
      if (mmap_array_new(&p->a2, 0, max_vertices, sizeof(float)) != 0) {
           error1 = "building a1 mmap array";
-          error2 = p->a2? p->a2->error.message: "NULL";
+          error2 = p->a2? p->a2->error->message: "NULL";
           goto on_error;
      }
 
@@ -83,14 +86,14 @@ hits_new(Hits **hits, const char *path, size_t max_vertices) {
      for (size_t i=0; i<max_vertices; ++i)
           if (mmap_array_set(p->h1, i, &v0) != 0) {
                error1 = "initializing h1";
-               error2 = p->h1->error.message;
+               error2 = p->h1->error->message;
                goto on_error;
           }
 
      for (size_t i=0; i<max_vertices; ++i)
           if (mmap_array_set(p->a1, i, &v0) != 0) {
                error1 = "initializing a1";
-               error2 = p->a1->error.message;
+               error2 = p->a1->error->message;
                goto on_error;
           }
 
@@ -100,7 +103,7 @@ on_error:
      hits_set_error(p, hits_error_internal, __func__);
      hits_add_error(p, error1);
      hits_add_error(p, error2);
-     return p->error.code;
+     return p->error->code;
 }
 
 HitsError
@@ -113,16 +116,16 @@ hits_delete(Hits *hits) {
 
      if (mmap_array_delete(hits->h1) != 0) {
           error1 = "deleting h1";
-          error2 = hits->h1->error.message;
+          error2 = hits->h1->error->message;
      } else if (mmap_array_delete(hits->h2) != 0) {
           error1 = "deleting h2";
-          error2 = hits->h2->error.message;
+          error2 = hits->h2->error->message;
      } else if (mmap_array_delete(hits->a1) != 0) {
           error1 = "deleting a1";
-          error2 = hits->a1->error.message;
+          error2 = hits->a1->error->message;
      } else if (mmap_array_delete(hits->a2) != 0) {
           error1 = "deleting a2";
-          error2 = hits->a2->error.message;
+          error2 = hits->a2->error->message;
      } else if (!hits->persist && (remove(hits->path_h1) != 0)) {
           error1 = "deleting h1 file";
           error2 = strerror(errno);
@@ -132,14 +135,14 @@ hits_delete(Hits *hits) {
      } else {
           free(hits->path_h1);
           free(hits->path_h2);
-          error_destroy(&hits->error);
+          error_delete(hits->error);
           free(hits);
           return 0;
      }
      hits_set_error(hits, hits_error_internal, __func__);
      hits_add_error(hits, error1);
      hits_add_error(hits, error2);
-     return hits->error.code;
+     return hits->error->code;
 }
 
 static HitsError
@@ -149,16 +152,16 @@ hits_expand(Hits *hits) {
 
      if (mmap_array_resize(hits->h1, 2*hits->h1->n_elements) != 0) {
           error1 = "resizing h1";
-          error2 = hits->h1->error.message;
+          error2 = hits->h1->error->message;
      } else if (mmap_array_resize(hits->h2, 2*hits->h2->n_elements) != 0) {
           error1 = "resizing h1";
-          error2 = hits->h1->error.message;
+          error2 = hits->h1->error->message;
      } else if (mmap_array_resize(hits->a1, 2*hits->a1->n_elements) != 0) {
           error1 = "resizing h1";
-          error2 = hits->h1->error.message;
+          error2 = hits->h1->error->message;
      } else if (mmap_array_resize(hits->a2, 2*hits->a2->n_elements) != 0) {
           error1 = "resizing h1";
-          error2 = hits->h1->error.message;
+          error2 = hits->h1->error->message;
      } else {
           return 0;
      }
@@ -166,7 +169,7 @@ hits_expand(Hits *hits) {
      hits_set_error(hits, hits_error_internal, __func__);
      hits_add_error(hits, error1);
      hits_add_error(hits, error2);
-     return hits->error.code;
+     return hits->error->code;
 }
 
 HitsError
@@ -248,7 +251,7 @@ hits_end_loop(Hits *hits, float *delta) {
      for (size_t i=0; i<hits->n_pages; ++i)
           if (!(score2 = mmap_array_idx(hits->h2, i))) {
                error1 = "accesing h2";
-               error2 = hits->h2->error.message;
+               error2 = hits->h2->error->message;
                goto on_error;
           } else {
                hub_sum += *score2;
@@ -257,13 +260,13 @@ hits_end_loop(Hits *hits, float *delta) {
      for (size_t i=0; i<hits->n_pages; ++i)
           if (!(score2 = mmap_array_idx(hits->h2, i))) {
                error1 = "accesing h2";
-               error2 = hits->h2->error.message;
+               error2 = hits->h2->error->message;
                goto on_error;
           } else {
                *score2 /= hub_sum;
                if (!(score1 = mmap_array_idx(hits->h1, i))) {
                     error1 = "accesing h1";
-                    error2 = hits->h1->error.message;
+                    error2 = hits->h1->error->message;
                     goto on_error;
                }
                float diff = fabs(*score2 - *score1);
@@ -281,7 +284,7 @@ hits_end_loop(Hits *hits, float *delta) {
      for (size_t i=0; i<hits->n_pages; ++i)
           if (!(score2 = mmap_array_idx(hits->a2, i))) {
                error1 = "accesing a2";
-               error2 = hits->a2->error.message;
+               error2 = hits->a2->error->message;
                goto on_error;
           } else {
                auth_sum += *score2;
@@ -290,13 +293,13 @@ hits_end_loop(Hits *hits, float *delta) {
      for (size_t i=0; i<hits->n_pages; ++i)
           if (!(score2 = mmap_array_idx(hits->a2, i))) {
                error1 = "accesing a2";
-               error2 = hits->a2->error.message;
+               error2 = hits->a2->error->message;
                goto on_error;
           } else {
                *score2 /= auth_sum;
                if (!(score1 = mmap_array_idx(hits->a1, i))) {
                     error1 = "accesing a1";
-                    error2 = hits->a1->error.message;
+                    error2 = hits->a1->error->message;
                     goto on_error;
                }
                float diff = fabs(*score2 - *score1);
@@ -311,7 +314,7 @@ on_error:
      hits_set_error(hits, hits_error_internal, __func__);
      hits_add_error(hits, error1);
      hits_add_error(hits, error2);
-     return hits->error.code;
+     return hits->error->code;
 }
 
 HitsError

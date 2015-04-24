@@ -35,6 +35,22 @@ error_destroy(Error *error) {
      (void)pthread_mutex_destroy(&error->mtx);
 }
 
+Error*
+error_new(void) {
+     Error *ret = malloc(sizeof(*ret));
+     if (ret)
+          error_init(ret);
+     return ret;
+}
+
+void
+error_delete(Error *error) {
+     if (error) {
+          error_destroy(error);
+          free(error);
+     }
+}
+
 void
 error_clean(Error *error) {
      if (error)
