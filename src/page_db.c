@@ -1322,17 +1322,24 @@ test_page_db_large(CuTest *tc) {
           sprintf(links[j].url = malloc(50), "test_url_%zu", j);
           links[j].score = j;
      }
-
+     time_t start = time(0);
+     printf("%s: \n", __func__);
      for (size_t i=0; i<n_pages; ++i) {
+#if 1
+          if (i % 10000 == 0) {
+               size_t delta = (size_t)difftime(time(0), start);
+               if (delta > 0) {
+                    printf("%10zuK/%zuM: %9zu pages/sec\n", 
+                           i/1000, n_pages/1000000, i/delta);
+               }
+          }
+#endif
           free(links[0].url);
           for (size_t j=0; j<n_links; ++j)
                links[j] = links[j+1];
           sprintf(links[n_links].url = malloc(50), "test_url_%zu", i + n_links);
           links[n_links].score = i;
-#if 0
-          if (i % 100000 == 0)
-               printf("% 12d\n", i);
-#endif
+
           CrawledPage *cp = crawled_page_new(links[0].url);
           for (size_t j=1; j<=n_links; ++j)
                crawled_page_add_link(cp, links[j].url, 0.5);

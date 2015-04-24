@@ -29,7 +29,7 @@
  *
  * In the schedule we want to keep an ordered heap of hashes, where we can pop
  * the highest scores whenever we want. In this sense it would have been more
- * natural to use as keys the scores (a single float) and the values the hashes.
+ * natural to use as keys the scores (a single float) and the page hashes as the values.
  * However, the scores may change as the page database changes and we want a
  * fast method to change the score associated to a hash. In particular we want
  * to make the change:
@@ -817,10 +817,17 @@ test_bf_scheduler_large_page_rank(CuTest *tc) {
           links[j].score = j;
      }
 
+     time_t start = time(0);
+     printf("%s: \n", __func__);
      for (size_t i=0; i<n_pages; ++i) {
-#if 0
-          if (i % 1000 == 0)
-               printf("%zu\n", i);
+#if 1
+          if (i % 10000 == 0) {
+               size_t delta = (size_t)difftime(time(0), start);
+               if (delta > 0) {
+                    printf("%10zuK/%zuM: %9zu pages/sec\n", 
+                           i/1000, n_pages/1000000, i/delta);
+               }
+          }
 #endif
           free(links[0].url);
           for (size_t j=0; j<n_links; ++j)
@@ -836,6 +843,14 @@ test_bf_scheduler_large_page_rank(CuTest *tc) {
                    sch->error.message,
                    bf_scheduler_add(sch, cp) == 0);
           crawled_page_delete(cp);
+
+          if (i % 10 == 0) {
+               PageRequest *req;
+               CuAssert(tc,
+                        sch->error.message,
+                        bf_scheduler_request(sch, 10, &req) == 0);
+               page_request_delete(req);
+          }
      }
      for (size_t j=0; j<=n_links; ++j)
           free(links[j].url);
@@ -881,10 +896,17 @@ test_bf_scheduler_large_hits(CuTest *tc) {
           links[j].score = j;
      }
 
+     time_t start = time(0);
+     printf("%s: \n", __func__);
      for (size_t i=0; i<n_pages; ++i) {
-#if 0
-          if (i % 1000 == 0)
-               printf("%zu\n", i);
+#if 1
+          if (i % 10000 == 0) {
+               size_t delta = (size_t)difftime(time(0), start);
+               if (delta > 0) {
+                    printf("%10zuK/%zuM: %9zu pages/sec\n", 
+                           i/1000, n_pages/1000000, i/delta);
+               }
+          }
 #endif
           free(links[0].url);
           for (size_t j=0; j<n_links; ++j)
@@ -900,6 +922,14 @@ test_bf_scheduler_large_hits(CuTest *tc) {
                    sch->error.message,
                    bf_scheduler_add(sch, cp) == 0);
           crawled_page_delete(cp);
+
+          if (i % 10 == 0) {
+               PageRequest *req;
+               CuAssert(tc,
+                        sch->error.message,
+                        bf_scheduler_request(sch, 10, &req) == 0);
+               page_request_delete(req);
+          }
      }
      for (size_t j=0; j<=n_links; ++j)
           free(links[j].url);
