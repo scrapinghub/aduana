@@ -1,5 +1,4 @@
 import ctypes as ct
-import shutil
 
 c_page_db = ct.cdll.LoadLibrary('../debug/libpagedb.so')
 
@@ -41,6 +40,9 @@ c_page_db.crawled_page_add_link.restype = ct.c_int
 c_page_db.crawled_page_n_links.argtypes = [ct.POINTER(c_CrawledPage)]
 c_page_db.crawled_page_n_links.restype = ct.c_size_t
 
+c_page_db.crawled_page_set_hash64.argtypes = [ct.POINTER(c_CrawledPage), ct.c_uint64]
+c_page_db.crawled_page_set_hash64.restype = ct.c_int
+
 c_page_db.crawled_page_get_link.argtypes = [
     ct.POINTER(c_CrawledPage),
     ct.c_size_t
@@ -50,7 +52,15 @@ c_page_db.crawled_page_get_link.restype = ct.POINTER(c_LinkInfo)
 class CrawledPage(object):
     def __init__(self, url, links=[]):
         self._cp = c_page_db.crawled_page_new(url)
-        for url, score in links:
+        for pair in links:
+            s = len(pair)
+            if s == 1:
+                url = pair
+                score = 0.0
+            else:
+                url = pair[0]
+                score = pair[1]
+
             c_page_db.crawled_page_add_link(
                 self._cp,
                 url,
@@ -64,6 +74,19 @@ class CrawledPage(object):
     def score(self, value):
         self._cp.contents.score = value
 
+    @property
+    def hash(self):
+        ret = None
+        phash = ct.cast(self._cp.contents.content_hash,
+                        ct.POINTER(ct.c_uint64))
+        if phash:
+            ret = phash.contents
+        return ret
+
+    @hash.setter
+    def hash(self, value):
+        c_page_db.crawled_page_set_hash64(self._cp, ct.c_uint64(value))
+        
     def get_links(self):
         links = []
         for i in xrange(c_page_db.crawled_page_n_links(self._cp)):
@@ -83,11 +106,56 @@ class c_PageInfo(ct.Structure):
         ("n_changes", ct.c_size_t),
         ("n_crawls", ct.c_size_t),
         ("score", ct.c_float),
-        ("content_hash_length", ct.c_char_p)
+        ("content_hash_length", ct.c_size_t),
+        ("content_hash", ct.c_char_p)
     ]
 
 c_page_db.page_info_delete.argtypes = [ct.POINTER(c_PageInfo)]
 c_page_db.page_info_delete.restype = None
+
+class c_PageDB(ct.Structure):
+    _fields_ = [
+        ("path", ct.c_char_p),
+        ("txn_manager", ct.c_void_p),
+        ("error", ct.c_void_p),
+        ("persist", ct.c_int)
+    ]
+
+c_page_db.page_db_hash.argtypes = [
+    ct.c_char_p
+]
+c_page_db.page_db_hash.restype = ct.c_uint64
+
+c_page_db.page_db_new.argtypes = [
+    ct.POINTER(ct.POINTER(c_PageDB)),
+    ct.c_char_p
+]
+c_page_db.page_db_new.restype = ct.c_int
+c_page_db.page_db_delete.argtypes = [ct.POINTER(c_PageDB)]
+c_page_db.page_db_delete.restype = ct.c_int
+
+class PageDB(object):
+    @classmethod
+    def urlhash(cls, url):
+        return c_page_db.page_db_hash(url)
+
+    def __init__(self, path, persist=0):
+        # save to make sure lib is available at destruction time
+        self._c = c_page_db
+        self._db = ct.POINTER(c_PageDB)()
+        self._c.page_db_new(ct.byref(self._db), path)
+        self.persist = persist
+
+    @property
+    def persist(self):
+        return self._db.contents.persist
+
+    @persist.setter
+    def persist(self, value):
+        self._db.contents.persist = value
+
+    def __del__(self):
+        self._c.page_db_delete(self._db)
 
 class c_PageRequest(ct.Structure):
     _fields_ = [
@@ -107,42 +175,6 @@ c_page_db.page_request_delete.restype = ct.c_int
 c_SchedulerAddFunc = ct.CFUNCTYPE(ct.c_int, ct.c_void_p, ct.c_void_p, ct.POINTER(c_PageInfo))
 c_SchedulerGetFunc = ct.CFUNCTYPE(ct.c_int, ct.c_void_p, ct.c_void_p)
 
-c_PAGE_DB_MAX_ERROR_LENGTH = 10000
-class c_PageDB(ct.Structure):
-    _fields_ = [
-        ("env", ct.c_void_p),
-        ("sched_add", c_SchedulerAddFunc),
-        ("sched_del", c_SchedulerGetFunc),
-        ("error", ct.c_int),
-        ("error_msg", ct.c_char*c_PAGE_DB_MAX_ERROR_LENGTH)
-    ]
-
-c_page_db.page_db_new.argtypes = [
-    ct.POINTER(ct.POINTER(c_PageDB)),
-    ct.c_char_p
-]
-c_page_db.page_db_new.restype = ct.c_int
-c_page_db.page_db_delete.argtypes = [ct.POINTER(c_PageDB)]
-c_page_db.page_db_delete.restype = None
-
-c_page_db.page_db_get_info_from_url.argtypes = [
-    ct.POINTER(c_PageDB),
-    ct.c_char_p,
-    ct.POINTER(ct.POINTER(c_PageInfo))
-]
-c_page_db.page_db_get_info_from_url.restype = ct.c_int
-
-import pdb
-class PageDB(object):
-    def __init__(self, path):
-        # save to make sure lib is available at destruction time
-        self._c = c_page_db
-        self._db = ct.POINTER(c_PageDB)()
-        self._c.page_db_new(ct.byref(self._db), path)
-
-    def __del__(self):
-        self._c.page_db_delete(self._db)
-
 if __name__ == '__main__':
     db = PageDB("./test_python_bindings")
-    shutil.rmtree("./test_python_bindings")
+    print PageDB.urlhash("www.google.com")
