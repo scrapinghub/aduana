@@ -258,7 +258,19 @@ page_info_update(PageInfo *pi, const CrawledPage *cp) {
      return 0;
 }
 
-int
+/** Serialize the PageInfo into a contiguos block of memory.
+ *
+ * Note that enough new memory will be allocated inside val.mv_data to contain
+ * the results of the dump. This memory should be freed when no longer is 
+ * necessary (for example after an mdb_cursor_put).
+ *
+ * @param pi The PageInfo to be serialized
+ * @param val The destination of the serialization. Should have no memory
+ *            allocated inside mv_data since new memory will be allocated.
+ *
+ * @return 0 if success, -1 if failure.
+ */
+static int
 page_info_dump(const PageInfo *pi, MDB_val *val) {
      size_t url_size = strlen(pi->url) + 1;
      val->mv_size =
@@ -286,7 +298,12 @@ page_info_dump(const PageInfo *pi, MDB_val *val) {
      return 0;
 }
 
-PageInfo *
+/** Create a new PageInfo loading the information from a previously
+ * dumped PageInfo inside val.
+ *
+ * @return pointer to the new PageInfo or NULL if failure
+ */
+static PageInfo *
 page_info_load(const MDB_val *val) {
      PageInfo *pi = malloc(sizeof(*pi));
      char *data = val->mv_data;

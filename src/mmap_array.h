@@ -4,7 +4,8 @@
 #include <stdlib.h>
 #include "util.h"
 
-#define MMAP_ARRAY_MAX_ERROR_LENGTH 10000
+/// @addtogroup MMapArray
+/// @{
 
 typedef enum {
      mmap_array_error_ok = 0,         /**< No error */
@@ -94,5 +95,7 @@ mmap_array_zero(MMapArray *marr);
  */
 MMapArrayError
 mmap_array_resize(MMapArray *marr, size_t n_elements);
+
+/// @}
 
 #endif // _MMAP_ARRAY

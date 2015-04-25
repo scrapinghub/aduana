@@ -6,12 +6,14 @@
 
 /** Posible states of a stream.
  *
+ * @verbatim
  *  ---> Error <-----+
  *        ^          |
  *        |          |
  *  ---> Init ----> Next --+-> End
  *             ^           |
  *             +-----------+
+ * @endverbatim
  */
 typedef enum {
      stream_state_init, /**< Stream ready */

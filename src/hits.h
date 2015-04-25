@@ -4,7 +4,8 @@
 #include "mmap_array.h"
 #include "link_stream.h"
 
-#define HITS_MAX_ERROR_LENGTH 10000
+/// @addtogroup Hits
+/// @{
 
 typedef enum {
      hits_error_ok = 0,
@@ -68,4 +69,5 @@ hits_get_authority(const Hits *pr,
                    float *score_old,
                    float *score_new);
 
+/// @}
 #endif // _HITS_H

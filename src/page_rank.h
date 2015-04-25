@@ -4,6 +4,9 @@
 #include "mmap_array.h"
 #include "link_stream.h"
 
+/// @addtogroup PageRank
+/// @{
+
 typedef enum {
      page_rank_error_ok = 0,
      page_rank_error_memory,
@@ -59,5 +62,7 @@ page_rank_compute(PageRank *pr,
 
 PageRankError
 page_rank_get(const PageRank *pr, size_t idx, float *score_old, float *score_new);
+
+/// @}
 
 #endif // _PAGE_RANK_H

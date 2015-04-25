@@ -2,6 +2,9 @@
 #define __SCORER_H__
 
 #include "page_db.h"
+
+/// @addtogroup Scorer
+/// @{
                                                         
 typedef int (ScorerUpdateFunc)(void *state);
 typedef int (ScorerAddFunc)(void *state, const PageInfo *page_info, float *score);
@@ -15,5 +18,7 @@ typedef struct {
      ScorerAddFunc *add;       /**< Add new page to scorer */
      ScorerGetFunc *get;       /**< Get a page score */
 } Scorer;
+
+/// @}
 
 #endif // __SCORER_H__

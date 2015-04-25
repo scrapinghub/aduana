@@ -171,29 +171,6 @@ typedef struct {
 int
 page_info_print(const PageInfo *pi, char *out);
 
-/** Serialize the PageInfo into a contiguos block of memory.
- *
- * Note that enough new memory will be allocated inside val.mv_data to contain
- * the results of the dump. This memory should be freed when no longer is 
- * necessary (for example after an mdb_cursor_put).
- *
- * @param pi The PageInfo to be serialized
- * @param val The destination of the serialization. Should have no memory
- *            allocated inside mv_data since new memory will be allocated.
- *
- * @return 0 if success, -1 if failure.
- */
-int
-page_info_dump(const PageInfo *pi, MDB_val *val);
-
-/** Create a new PageInfo loading the information from a previously
- * dumped PageInfo inside val.
- *
- * @return pointer to the new PageInfo or NULL if failure
- */
-PageInfo *
-page_info_load(const MDB_val *val);
-
 /** Estimate change rate of the given page. If no valid rate can be computed 
  * return -1.0, otherwise a valid nonnegative change rate. */
 float
@@ -397,7 +374,7 @@ page_db_link_stream_delete(PageDBLinkStream *es);
 /// @addtogroup HashIdxStream
 /// @{
 
-/** Stream over hash/index pairs insde PageDB */
+/** Stream over hash/index pairs inside PageDB */
 typedef struct {
      PageDB *db;
      MDB_cursor *cur;   /**< Cursor to the hash2idx database */     

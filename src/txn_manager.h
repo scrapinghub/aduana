@@ -6,6 +6,9 @@
 
 #include "util.h"
 
+/// @addtogroup InvSemaphore
+/// @{
+
 /** Inverse Semaphore. 
  *
  * An inverse semaphore blocks when the count is greater than zero (a regular
@@ -65,6 +68,10 @@ inv_semaphore_release(InvSemaphore *is);
 int
 inv_semaphore_destroy(InvSemaphore *is);
 
+/// @}
+
+/// @addtogroup TxnManager
+/// @{
 typedef enum {
      txn_manager_error_ok = 0,   /**< No error */
      txn_manager_error_internal, /**< Unexpected error */
@@ -146,4 +153,5 @@ txn_manager_delete(TxnManager *tm);
 TxnManagerError
 txn_manager_expand(TxnManager *tm);
 
+/// @}
 #endif // __TXN_MANAGER_H__

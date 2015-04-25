@@ -8,9 +8,20 @@
 #include "scorer.h"
 #include "txn_manager.h"
 
-#define BF_SCHEDULER_MAX_ERROR_LENGTH 10000
+/// @addtogroup BFScheduler
+/// @{
+
+/** Size of the mmap to store the schedule */
 #define BF_SCHEDULER_DEFAULT_SIZE PAGE_DB_DEFAULT_SIZE
+
+/** Updating the schedule involves starting a write transaction. However write
+    transactions coming from multiple threads are serialized. Since adding
+    new pages to the schedule and returning requests also start write transactions
+    it means that the update thread could block this more critical operations.
+    To avoid this we avoid long write transactions and split them in batches. */
 #define BF_SCHEDULER_UPDATE_BATCH_SIZE 1000
+
+/** Default value for BFScheduler::persist */
 #define BF_SCHEDULER_DEFAULT_PERSIST 1
 
 typedef enum {
@@ -18,21 +29,30 @@ typedef enum {
      bf_scheduler_error_memory,       /**< Error allocating memory */
      bf_scheduler_error_invalid_path, /**< File system error */
      bf_scheduler_error_internal,     /**< Unexpected error */
-     bf_scheduler_error_thread
+     bf_scheduler_error_thread        /**< Error inside the threading library */
 } BFSchedulerError;
 
 /** Flow:
  *
- *   None  ----> Working -----> Stopped -----> Finished
- *                 ^              |               |
- *                 +--------------+               |
- *                 +------------------------------+
+   @verbatim
+           start          stop          automatic
+     None  ----> Working -----> Stopped----------> Finished
+                   ^              |                   |
+                   +--------------+                   |
+                   |    start                         |
+                   +----------------------------------+
+                                    start
+
+   @endverbatim
+ *
+ * start is commanded by @ref bf_scheduler_update_start and
+ * stop is commanded by @ref bf_scheduler_update_stop
  */
 typedef enum {
-     update_thread_none,
-     update_thread_working,
-     update_thread_stopped,
-     update_thread_finished
+     update_thread_none,      /**< The thread has not been started */
+     update_thread_working,   /**< Thread started and working */
+     update_thread_stopped,   /**< Thread has been commanded to stop, but has not exited yet */
+     update_thread_finished   /**< Thread finished */
 } UpdateThreadState;
 
 typedef struct {
@@ -40,7 +60,7 @@ typedef struct {
       *
       * The page database is neither created nor destroyed by the scheduler.
       * The rationale is that the scheduler can be changed while using the same
-      * @ref PageDB. The schedure is "attached" to the @ref PageDB.
+      * @ref PageDB. The schedule is "attached" to the @ref PageDB.
       * */
      PageDB *page_db;
      /** The scorer use to get page score.
@@ -67,14 +87,18 @@ typedef struct {
 
 // Update thread
 // -----------------------------------------------------------------------------
+     /** We only perform an update of scores and schedule when enough new pages
+      * have been added, otherwise the update thread sleeps */
      pthread_mutex_t n_pages_mutex;
-     pthread_cond_t n_pages_cond;
-     double n_pages_old; /**< Number of pages when last updated was done */
-     double n_pages_new; /**< Current number of pages */
+     pthread_cond_t n_pages_cond;    /**< Signaled when a page is added */
+     double n_pages_old;             /**< Number of pages when last updated was done */
+     double n_pages_new;             /**< Current number of pages */
 
+     /** The update thread runs in parallel the scorer and updates the schedule
+         when changes in score happen */
      pthread_t update_thread;
-     pthread_mutex_t update_mutex;
-     UpdateThreadState update_state;
+     pthread_mutex_t update_mutex;   /**< Sync access to update_state */
+     UpdateThreadState update_state; /**< See @ref UpdateThreadState */
 
 // Options
 // -----------------------------------------------------------------------------
@@ -126,6 +150,15 @@ bf_scheduler_request(BFScheduler *sch, size_t n_pages, PageRequest **request);
  */
 void
 bf_scheduler_delete(BFScheduler *sch);
+
+/** Start the update thread */
+BFSchedulerError
+bf_scheduler_update_start(BFScheduler *sch);
+
+/** Stop the update thread */
+BFSchedulerError
+bf_scheduler_update_stop(BFScheduler *sch);
+/// @}
 
 #if (defined TEST) && TEST
 #include "CuTest.h"

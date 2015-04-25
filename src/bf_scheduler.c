@@ -449,7 +449,7 @@ bf_scheduler_update_finished(BFScheduler *sch, int *stop) {
      return bf_scheduler_mutex_unlock(sch);
 }
 
-void*
+static void*
 bf_scheduler_update_thread(void *arg) {
      BFScheduler *sch = arg;
      int stop = 0;

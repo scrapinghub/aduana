@@ -1,6 +1,9 @@
 #ifndef __SCHEDULER_H__
 #define __SCHEDULER_H__
 
+/// @addtogroup Scheduler
+/// @{
+
 /** A request is an array of URLS */
 typedef struct {
      char **urls;
@@ -18,5 +21,7 @@ page_request_add_url(PageRequest *req, const char *url);
 
 typedef int (SchedulerCrawledPage)(void *scheduler, const CrawledPage* cp);
 typedef int (SchedulerNextRequests)(void *scheduler, PageRequest *requests);
+
+/// @}
 
 #endif // __SCHEDULER_H__

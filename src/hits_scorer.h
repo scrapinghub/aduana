@@ -6,6 +6,9 @@
 #include "scorer.h"
 #include "util.h"
 
+/// @addtogroup HitsScorer
+/// @{
+
 typedef enum {
      hits_scorer_error_ok = 0,
      hits_scorer_error_memory,
@@ -34,5 +37,7 @@ hits_scorer_delete(HitsScorer *hs);
 
 void
 hits_scorer_setup(HitsScorer *hs, Scorer *scorer);
+
+/// @}
 
 #endif // __HITS_SCORER_H__

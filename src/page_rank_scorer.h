@@ -6,6 +6,9 @@
 #include "scorer.h"
 #include "util.h"
 
+/// @addtogroup PageRankScorer
+/// @{
+
 typedef enum {
      page_rank_scorer_error_ok = 0,
      page_rank_scorer_error_memory,
@@ -34,5 +37,7 @@ page_rank_scorer_delete(PageRankScorer *prs);
 
 void
 page_rank_scorer_setup(PageRankScorer *prs, Scorer *scorer);
+
+/// @}
 
 #endif // __PAGE_RANK_SCORER_H__

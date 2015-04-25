@@ -31,7 +31,7 @@ mmap_array_set_error_out_of_bounds(MMapArray *marr, size_t n) {
      marr->error->code = mmap_array_error_out_of_bounds;
      if (snprintf(
               marr->error->message,
-              MMAP_ARRAY_MAX_ERROR_LENGTH,
+              MAX_ERROR_LENGTH,
               "Out of bounds error: %zu (max: %zu)",
               n,
               marr->n_elements) < 0) {
