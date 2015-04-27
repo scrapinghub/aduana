@@ -47,6 +47,7 @@ page_rank_new(PageRank **pr, const char *path, size_t max_vertices) {
      p->max_loops = PAGE_RANK_DEFAULT_MAX_LOOPS;
      p->persist = PAGE_RANK_DEFAULT_PERSIST;
      p->precision = PAGE_RANK_DEFAULT_PRECISION;
+     p->scores = 0;
 
      char *error1 = 0;
      char *error2 = 0;
@@ -207,7 +208,15 @@ page_rank_init(PageRank *pr,
                float *deg = mmap_array_idx(pr->out_degree, link.from);
                if (!deg)
                     return page_rank_error_internal;
-               ++(*deg);
+               if (!pr->scores) {
+                    ++(*deg);
+               } else {
+                    // if scores are available out_degree represents the total
+                    // score of all outgoing links
+                    float *score = mmap_array_idx(pr->scores, link.to);
+                    if (score)
+                         *deg += *score;
+               }
                break;
           }
      } while (!end_stream);
@@ -295,8 +304,16 @@ page_rank_loop(PageRank *pr,
                     goto on_error;
                }
 #endif
-               if (value1 && value2 && degree)
-                    *value2 += pr->damping*(*value1)/(*degree);
+               if (value1 && value2 && degree) {
+                    float weight;
+                    if (pr->scores) {
+                         float *score = mmap_array_idx(pr->scores, link.to);
+                         weight = score? (*score)/(*degree): 0.0;
+                    } else {
+                         weight = 1.0/(*degree);
+                    }
+                    *value2 += pr->damping*(*value1)*weight;
+               }
                break;
           }
      } while (!end_stream);

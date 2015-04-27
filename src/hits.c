@@ -44,7 +44,7 @@ hits_new(Hits **hits, const char *path, size_t max_vertices) {
      p->max_loops = HITS_DEFAULT_MAX_LOOPS;
      p->precision = HITS_DEFAULT_PRECISION;
      p->persist = HITS_DEFAULT_PERSIST;
-
+     p->scores = 0;
 
      char *error1 = 0;
      char *error2 = 0;
@@ -216,10 +216,17 @@ hits_loop(Hits *hits,
                // hub[i] = sum(auth[j]) for all j such that i->j
                float *s2 = mmap_array_idx(hits->h2, link.from);
                float *s1 = mmap_array_idx(hits->a1, link.to);
-               if (s1 && s2)
-                    *s2 += *s1;
-               else
+               if (s1 && s2) {
+                    if (hits->scores) {
+                         float *score = mmap_array_idx(hits->scores, link.to);
+                         if (score)
+                              *s2 += (*score)*(*s1);
+                    } else {
+                         *s2 += *s1;
+                    }
+               } else {
                     return hits_error_internal;
+               }
 
                // auth[i] = sum(hub[j]) for all j such that j->i
                s2 = mmap_array_idx(hits->a2, link.to);

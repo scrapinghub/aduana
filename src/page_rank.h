@@ -35,6 +35,8 @@ typedef struct {
 // -----------------------------------------------------------------------------
      /** Probability of making a random page jump: 1.0 - damping */
      float damping;
+     /** External computed scores associated with the pages */
+     MMapArray *scores;
      /** If greater than 0 stop computation even if precision was not achieved */
      size_t max_loops;
      /** Stop iteration when the the largest change in any page score is below
