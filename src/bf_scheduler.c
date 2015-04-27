@@ -72,26 +72,26 @@ bf_scheduler_add_error(BFScheduler *sch, const char *message) {
 
 BFSchedulerError
 bf_scheduler_new(BFScheduler **sch, PageDB *db) {
-     BFScheduler *p = *sch = malloc(sizeof(*p));
-     if (!p)
-          return bf_scheduler_error_memory;
-     if (!(p->error = error_new())) {
+     BFScheduler *p = *sch = calloc(1, sizeof(*p));
+     if (!p ||
+         !(p->error         = error_new()) ||
+         !(p->scorer        = calloc(1, sizeof(*p->scorer))) ||
+         !(p->update_thread = calloc(1, sizeof(*p->update_thread)))) {
+
+          free(p->update_thread);
+          free(p->scorer);
+          free(p->error);
           free(p);
+
           return bf_scheduler_error_memory;
      }
-
-     p->scorer.state = 0;
-     p->scorer.add = 0;
-     p->scorer.get = 0;
-     p->scorer.update = 0;
-
      char *error = 0;
      int rc;
-     if ((rc = pthread_mutex_init(&p->update_mutex, 0)) != 0)
+     if ((rc = pthread_mutex_init(&p->update_thread->state_mutex, 0)) != 0)
           error = "initializing update thread mutex";
-     else if ((rc = pthread_mutex_init(&p->n_pages_mutex, 0)) != 0)
+     else if ((rc = pthread_mutex_init(&p->update_thread->n_pages_mutex, 0)) != 0)
           error = "initializing n_pages mutex";
-     else if ((rc = pthread_cond_init(&p->n_pages_cond, 0)) != 0)
+     else if ((rc = pthread_cond_init(&p->update_thread->n_pages_cond, 0)) != 0)
           error = "initializing n_pages cond";
 
      if (error != 0) {
@@ -101,9 +101,9 @@ bf_scheduler_new(BFScheduler **sch, PageDB *db) {
           return 0;
 
      }
-     p->update_state = update_thread_none;
-     p->n_pages_old = 0.0;
-     p->n_pages_new = 0.0;
+     p->update_thread->state = update_thread_none;
+     p->update_thread->n_pages_old = 0.0;
+     p->update_thread->n_pages_new = 0.0;
 
      p->page_db = db;
      p->persist = BF_SCHEDULER_DEFAULT_PERSIST;
@@ -193,13 +193,13 @@ bf_scheduler_add(BFScheduler *sch, const CrawledPage *page) {
      }
 
      int rc = 0;
-     if ((rc = pthread_mutex_lock(&sch->n_pages_mutex)) != 0)
+     if ((rc = pthread_mutex_lock(&sch->update_thread->n_pages_mutex)) != 0)
           error1 = "locking n_pages mutex";
      else {
-          sch->n_pages_new += 1.0;
-          if ((rc = pthread_cond_broadcast(&sch->n_pages_cond)) != 0)
+          sch->update_thread->n_pages_new += 1.0;
+          if ((rc = pthread_cond_broadcast(&sch->update_thread->n_pages_cond)) != 0)
                error1 = "broadcasting n_pages signal";
-          else if ((rc = pthread_mutex_unlock(&sch->n_pages_mutex)) != 0)
+          else if ((rc = pthread_mutex_unlock(&sch->update_thread->n_pages_mutex)) != 0)
                error1 = "unlocking n_pages mutex";
      }
      if (error1 != 0) {
@@ -227,8 +227,8 @@ bf_scheduler_add(BFScheduler *sch, const CrawledPage *page) {
                     .score = 0.0,
                     .hash = node->hash
                };
-               if (sch->scorer.state)
-                    sch->scorer.add(sch->scorer.state, pi, &se.score);
+               if (sch->scorer->state)
+                    sch->scorer->add(sch->scorer->state, pi, &se.score);
                else
                     se.score = -pi->score;
                MDB_val key = {
@@ -315,7 +315,7 @@ on_error:
 
 static BFSchedulerError
 bf_scheduler_update_batch(BFScheduler *sch) {
-     assert(sch->scorer.state != 0);
+     assert(sch->scorer->state != 0);
 
      if (bf_scheduler_expand(sch) != 0)
           return sch->error->code;
@@ -328,8 +328,8 @@ bf_scheduler_update_batch(BFScheduler *sch) {
      // if no Hash/Idx stream active create a new one. It will be deleted if:
      //     1. We reach stream_state_end or
      //     2. An error is produced
-     if (!sch->stream &&
-         (hashidx_stream_new(&sch->stream, sch->page_db) != 0)) {
+     if (!sch->update_thread->stream &&
+         (hashidx_stream_new(&sch->update_thread->stream, sch->page_db) != 0)) {
                error1 = "creating Hash/Index stream";
                error2 = sch->page_db->error->message;
                goto on_error;
@@ -351,27 +351,27 @@ bf_scheduler_update_batch(BFScheduler *sch) {
      // we make the update in batches because there can be only one simultaneous
      // write transaction, and we need another write transaction to get requests, which
      // actually has higher priority
-     for (size_t i=0; i<BF_SCHEDULER_UPDATE_BATCH_SIZE && sch->stream; ++i) {
+     for (size_t i=0; i<BF_SCHEDULER_UPDATE_BATCH_SIZE && sch->update_thread->stream; ++i) {
 
           uint64_t hash;
           size_t idx;
           float score_old;
           float score_new;
-          switch (hashidx_stream_next(sch->stream, &hash, &idx)) {
+          switch (hashidx_stream_next(sch->update_thread->stream, &hash, &idx)) {
           case stream_state_next:
-               sch->scorer.get(sch->scorer.state, idx, &score_old, &score_new);
+               sch->scorer->get(sch->scorer->state, idx, &score_old, &score_new);
                // to gain some performance we don't bother to change the schedule unless
                // there is some significant score change
                if (fabs(score_old - score_new) >= 0.1*fabs(score_old) &&
                    (bf_scheduler_change_score(sch, cur, hash, score_old, score_new) != 0)) {
-                    hashidx_stream_delete(sch->stream);
+                    hashidx_stream_delete(sch->update_thread->stream);
                     txn_manager_abort(sch->txn_manager, txn);
                     return sch->error->code;
                }
                break;
           case stream_state_end:
-               hashidx_stream_delete(sch->stream);
-               sch->stream = 0;
+               hashidx_stream_delete(sch->update_thread->stream);
+               sch->update_thread->stream = 0;
                break;
           case stream_state_init: // not possible really
           case stream_state_error:
@@ -390,8 +390,8 @@ bf_scheduler_update_batch(BFScheduler *sch) {
 
      return 0;
 on_error:
-     if (sch->stream)
-          hashidx_stream_delete(sch->stream);
+     if (sch->update_thread->stream)
+          hashidx_stream_delete(sch->update_thread->stream);
      if (txn)
           txn_manager_abort(sch->txn_manager, txn);
 
@@ -403,7 +403,7 @@ on_error:
 
 static BFSchedulerError
 bf_scheduler_update_step(BFScheduler *sch) {
-     if (sch->scorer.update(sch->scorer.state) != 0) {
+     if (sch->scorer->update(sch->scorer->state) != 0) {
           bf_scheduler_set_error(sch, bf_scheduler_error_internal, __func__);
           bf_scheduler_add_error(sch, "updating scorer");
           return sch->error->code;
@@ -411,13 +411,13 @@ bf_scheduler_update_step(BFScheduler *sch) {
      do {
           if (bf_scheduler_update_batch(sch) != 0)
                return sch->error->code;
-     } while (sch->stream);
+     } while (sch->update_thread->stream);
      return 0;
 }
 
 static BFSchedulerError
 bf_scheduler_mutex_lock(BFScheduler *sch) {
-     int rc = pthread_mutex_lock(&sch->update_mutex);
+     int rc = pthread_mutex_lock(&sch->update_thread->state_mutex);
      if (rc != 0) {
           bf_scheduler_set_error(sch, bf_scheduler_error_thread, __func__);
           bf_scheduler_add_error(sch, "locking update thread mutex");
@@ -428,7 +428,7 @@ bf_scheduler_mutex_lock(BFScheduler *sch) {
 
 static BFSchedulerError
 bf_scheduler_mutex_unlock(BFScheduler *sch) {
-     int rc = pthread_mutex_unlock(&sch->update_mutex);
+     int rc = pthread_mutex_unlock(&sch->update_thread->state_mutex);
      if (rc != 0) {
           bf_scheduler_set_error(sch, bf_scheduler_error_thread, __func__);
           bf_scheduler_add_error(sch, "unlocking update thread mutex");
@@ -442,9 +442,9 @@ bf_scheduler_update_finished(BFScheduler *sch, int *stop) {
      if (bf_scheduler_mutex_lock(sch) != 0)
           return sch->error->code;
 
-     if (sch->update_state == update_thread_stopped)
-          sch->update_state = update_thread_finished;
-     *stop = (sch->update_state == update_thread_finished);
+     if (sch->update_thread->state == update_thread_stopped)
+          sch->update_thread->state = update_thread_finished;
+     *stop = (sch->update_thread->state == update_thread_finished);
 
      return bf_scheduler_mutex_unlock(sch);
 }
@@ -455,13 +455,13 @@ bf_scheduler_update_thread(void *arg) {
      int stop = 0;
      int rc = 0;
      do {
-          if ((rc = pthread_mutex_lock(&sch->n_pages_mutex)) != 0)
+          if ((rc = pthread_mutex_lock(&sch->update_thread->n_pages_mutex)) != 0)
                goto error_thread;
 
-          while ((sch->n_pages_new < sch->n_pages_old + 1000.0) ||
-                 (sch->n_pages_new < 1.1*sch->n_pages_old)) {
-               if ((rc = pthread_cond_wait(&sch->n_pages_cond,
-                                           &sch->n_pages_mutex)) != 0)
+          while ((sch->update_thread->n_pages_new < sch->update_thread->n_pages_old + 1000.0) ||
+                 (sch->update_thread->n_pages_new < 1.1*sch->update_thread->n_pages_old)) {
+               if ((rc = pthread_cond_wait(&sch->update_thread->n_pages_cond,
+                                           &sch->update_thread->n_pages_mutex)) != 0)
                     goto error_thread;
 
                if (bf_scheduler_update_finished(sch, &stop) != 0)
@@ -469,8 +469,8 @@ bf_scheduler_update_thread(void *arg) {
                if (stop)
                     break;
           }
-          sch->n_pages_old = sch->n_pages_new;
-          if ((rc = pthread_mutex_unlock(&sch->n_pages_mutex)) != 0)
+          sch->update_thread->n_pages_old = sch->update_thread->n_pages_new;
+          if ((rc = pthread_mutex_unlock(&sch->update_thread->n_pages_mutex)) != 0)
                goto error_thread;
 
           if (bf_scheduler_update_finished(sch, &stop) != 0)
@@ -494,15 +494,15 @@ error_thread:
 BFSchedulerError
 bf_scheduler_update_start(BFScheduler *sch) {
      BFSchedulerError rc;
-     if (sch->scorer.state) {
+     if (sch->scorer->state) {
           if ((rc = bf_scheduler_mutex_lock(sch)) != 0)
                return rc;
 
-          switch (sch->update_state) {
+          switch (sch->update_thread->state) {
           case update_thread_finished:
                // the update thread acknowledges it has to stop. It will
                // take very little time to stop, just join with it.
-               if ((rc = pthread_join(sch->update_thread, 0)) != 0) {
+               if ((rc = pthread_join(sch->update_thread->thread, 0)) != 0) {
                     bf_scheduler_set_error(sch, bf_scheduler_error_thread, __func__);
                     bf_scheduler_add_error(sch, "joining with update thread");
                     bf_scheduler_add_error(sch, strerror(rc));
@@ -511,7 +511,7 @@ bf_scheduler_update_start(BFScheduler *sch) {
           case update_thread_none:
                // create a new thread and put to work
                if ((rc = pthread_create(
-                         &sch->update_thread,
+                         &sch->update_thread->thread,
                          0,
                          bf_scheduler_update_thread,
                          (void*)sch)) != 0) {
@@ -521,7 +521,7 @@ bf_scheduler_update_start(BFScheduler *sch) {
                     return sch->error->code;
                }
           case update_thread_stopped:
-               sch->update_state = update_thread_working;
+               sch->update_thread->state = update_thread_working;
                break;
           case update_thread_working:
                // do nothing
@@ -535,19 +535,19 @@ bf_scheduler_update_start(BFScheduler *sch) {
 
 BFSchedulerError
 bf_scheduler_update_stop(BFScheduler *sch) {
-     if (sch->scorer.state)
+     if (sch->scorer->state)
           if (bf_scheduler_mutex_lock(sch) == 0) {
-               switch (sch->update_state) {
+               switch (sch->update_thread->state) {
                case update_thread_none:
                     bf_scheduler_set_error(sch, bf_scheduler_error_thread, __func__);
                     bf_scheduler_add_error(sch, "attempted to stop non-existing update thread");
                     break;
                case update_thread_working:
-                    sch->update_state = update_thread_stopped;
+                    sch->update_thread->state = update_thread_stopped;
 
-                    pthread_mutex_lock(&sch->n_pages_mutex);
-                    pthread_cond_broadcast(&sch->n_pages_cond);
-                    pthread_mutex_unlock(&sch->n_pages_mutex);
+                    pthread_mutex_lock(&sch->update_thread->n_pages_mutex);
+                    pthread_cond_broadcast(&sch->update_thread->n_pages_cond);
+                    pthread_mutex_unlock(&sch->update_thread->n_pages_mutex);
 
                     break;
                case update_thread_stopped:
@@ -650,10 +650,13 @@ bf_scheduler_set_persist(BFScheduler *sch, int value) {
 
 void
 bf_scheduler_delete(BFScheduler *sch) {
-     if (sch->update_state != update_thread_none) {
+     if (sch->update_thread->state != update_thread_none) {
           (void)bf_scheduler_update_stop(sch);
-          (void)pthread_join(sch->update_thread, 0);
+          (void)pthread_join(sch->update_thread->thread, 0);
      }
+     (void)pthread_mutex_destroy(&sch->update_thread->n_pages_mutex);
+     (void)pthread_cond_destroy(&sch->update_thread->n_pages_cond);
+     (void)pthread_mutex_destroy(&sch->update_thread->state_mutex);
 
      mdb_env_close(sch->txn_manager->env);
      (void)txn_manager_delete(sch->txn_manager);
@@ -667,6 +670,7 @@ bf_scheduler_delete(BFScheduler *sch) {
 
           remove(sch->path);
      }
+     free(sch->scorer);
      free(sch->path);
      error_delete(sch->error);
      free(sch);
@@ -811,7 +815,7 @@ test_bf_scheduler_large_page_rank(CuTest *tc) {
               scorer != 0? scorer->error->message: "NULL",
               page_rank_scorer_new(&scorer, db) == 0);
 
-     page_rank_scorer_setup(scorer, &sch->scorer);
+     page_rank_scorer_setup(scorer, sch->scorer);
      bf_scheduler_update_start(sch);
 
      const size_t n_links = 10;
@@ -890,7 +894,7 @@ test_bf_scheduler_large_hits(CuTest *tc) {
               scorer != 0? scorer->error->message: "NULL",
               hits_scorer_new(&scorer, db) == 0);
 
-     hits_scorer_setup(scorer, &sch->scorer);
+     hits_scorer_setup(scorer, sch->scorer);
      bf_scheduler_update_start(sch);
 
      const size_t n_links = 10;

@@ -54,8 +54,7 @@ class CrawledPage(object):
         self._c = c_page_db
         self._cp = self._c.crawled_page_new(url)
         for pair in links:
-            s = len(pair)
-            if s == 1:
+            if (isinstance(pair, basestring)):
                 url = pair
                 score = 0.0
             else:
@@ -97,22 +96,6 @@ class CrawledPage(object):
 
     def __del__(self):
         self._c.crawled_page_delete(self._cp)
-
-
-class c_PageInfo(ct.Structure):
-    _fields_ = [
-        ("url", ct.c_char_p),
-        ("first_crawl", ct.c_double),
-        ("last_crawl", ct.c_double),
-        ("n_changes", ct.c_size_t),
-        ("n_crawls", ct.c_size_t),
-        ("score", ct.c_float),
-        ("content_hash_length", ct.c_size_t),
-        ("content_hash", ct.c_char_p)
-    ]
-
-c_page_db.page_info_delete.argtypes = [ct.POINTER(c_PageInfo)]
-c_page_db.page_info_delete.restype = None
 
 class c_PageDB(ct.Structure):
     _fields_ = [
@@ -160,13 +143,27 @@ class PageDB(object):
     def __del__(self):
         self._c.page_db_delete(self._db)
 
-
 c_pPageRankScorer = ct.c_void_p
 c_page_db.page_rank_scorer_new.argtypes = [
     ct.POINTER(c_pPageRankScorer), ct.POINTER(c_PageDB)]
 c_page_db.page_rank_scorer_new.restype = ct.c_int
 c_page_db.page_rank_scorer_delete.argtypes = [c_pPageRankScorer]
 c_page_db.page_rank_scorer_delete.restype = ct.c_int
+c_page_db.page_rank_scorer_setup.argtypes = [c_pPageRankScorer, ct.c_void_p]
+c_page_db.page_rank_scorer_setup.restype = None
+
+class PageRankScorer(object):
+    def __init__(self, page_db):
+        self._c = c_page_db
+
+        self._pRS = c_pPageRankScorer()
+        self._c.page_rank_scorer_new(ct.byref(self._pRS), page_db._db)
+
+    def __del__(self):
+        self._c.page_rank_scorer_delete(self._pRS)
+
+    def setup(self, scorer):
+        self._c.page_rank_scorer_setup(self._pRS, scorer)
 
 class c_PageRequest(ct.Structure):
     _fields_ = [
@@ -183,39 +180,52 @@ c_page_db.page_request_delete.restype = None
 c_page_db.page_request_add_url.argtypes = [ct.POINTER(c_PageRequest), ct.c_char_p]
 c_page_db.page_request_delete.restype = ct.c_int
 
-c_SchedulerAddFunc = ct.CFUNCTYPE(ct.c_int, ct.c_void_p, ct.c_void_p, ct.POINTER(c_PageInfo))
-c_SchedulerGetFunc = ct.CFUNCTYPE(ct.c_int, ct.c_void_p, ct.c_void_p)
-
-c_pBFScheduler = ct.c_void_p
+class c_BFScheduler(ct.Structure):
+    _fields_ = [
+        ("page_db", ct.POINTER(c_PageDB)),
+        ("scorer", ct.c_void_p),
+        ("txn_manager", ct.c_void_p),
+        ("path", ct.c_char_p),
+        ("update_thread", ct.c_void_p),
+        ("error", ct.c_void_p),
+        ("persist", ct.c_int)
+    ]
 c_page_db.bf_scheduler_new.argtypes = [
-    ct.POINTER(c_pBFScheduler), ct.POINTER(c_PageDB)]
+    ct.POINTER(ct.POINTER(c_BFScheduler)), ct.POINTER(c_PageDB)]
 c_page_db.bf_scheduler_new.restype = ct.c_int
 c_page_db.bf_scheduler_add.argtypes = [
-    c_pBFScheduler, ct.POINTER(c_CrawledPage)]
+    ct.POINTER(c_BFScheduler), ct.POINTER(c_CrawledPage)]
 c_page_db.bf_scheduler_add.restype = ct.c_int
 c_page_db.bf_scheduler_request.argtypes = [
-    c_pBFScheduler, ct.c_size_t, ct.POINTER(ct.POINTER(c_PageRequest))]
+    ct.POINTER(c_BFScheduler),
+    ct.c_size_t,
+    ct.POINTER(ct.POINTER(c_PageRequest))
+]
 c_page_db.bf_scheduler_request.restype = ct.c_int
-c_page_db.bf_scheduler_delete.argtypes = [c_pBFScheduler]
+c_page_db.bf_scheduler_delete.argtypes = [ct.POINTER(c_BFScheduler)]
 c_page_db.bf_scheduler_delete.restype = None
-c_page_db.bf_scheduler_update_start.argtypes = [c_pBFScheduler]
+c_page_db.bf_scheduler_update_start.argtypes = [ct.POINTER(c_BFScheduler)]
 c_page_db.bf_scheduler_update_start.restype = None
-c_page_db.bf_scheduler_update_stop.argtypes = [c_pBFScheduler]
+c_page_db.bf_scheduler_update_stop.argtypes = [ct.POINTER(c_BFScheduler)]
 c_page_db.bf_scheduler_update_stop.restype = None
-c_page_db.bf_scheduler_set_persist.argtypes = [c_pBFScheduler, ct.c_int]
+c_page_db.bf_scheduler_set_persist.argtypes = [ct.POINTER(c_BFScheduler), ct.c_int]
 c_page_db.bf_scheduler_set_persist.restype = None
 
 class BFScheduler(object):
-    def __init__(self, path, persist=0):
+    def __init__(self, path, persist=0, scorer_class=None):
         # save to make sure lib is available at destruction time
         self._c = c_page_db
 
         self._db = PageDB(path, persist)
-        self._pBF = c_pBFScheduler()
+        self._pBF = ct.POINTER(c_BFScheduler)()
 
         self._c.bf_scheduler_new(ct.byref(self._pBF), self._db._db)
         self._c.bf_scheduler_set_persist(self._pBF, persist)
-        self._c.bf_scheduler_update_start(self._pBF)
+
+        if scorer_class:
+            self._scorer = scorer_class(self._db)
+            self._scorer.setup(self._pBF.contents.scorer)
+            self._c.bf_scheduler_update_start(self._pBF)
 
     def __del__(self):
         self._c.bf_scheduler_update_stop(self._pBF)
@@ -231,9 +241,13 @@ class BFScheduler(object):
         self._c.page_request_delete(pReq)
         return reqs
 
+
 if __name__ == '__main__':
-    bf = BFScheduler("./test_python_bindings")
-    cp = CrawledPage("a", ["1", "2", "3"])
-    bf.add(cp)
-    for url in bf.requests(10):
-        print url
+    bf = BFScheduler("./test_python_bindings", scorer_class=PageRankScorer)
+    for i in xrange(100000):
+        cp = CrawledPage(str(i), [str(i + j) for j in xrange(10)])
+        bf.add(cp)
+        if i % 10 == 0:
+            for url in bf.requests(10):
+                print url,', ',
+            print

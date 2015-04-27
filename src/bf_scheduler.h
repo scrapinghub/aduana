@@ -55,6 +55,29 @@ typedef enum {
      update_thread_finished   /**< Thread finished */
 } UpdateThreadState;
 
+/** All variables associated with just the update thread */
+typedef struct {
+     /** An stream of Hash/Index pairs.
+      *
+      * This is necessary because page scores can change. This is stream is used
+      * to make sure all page scores are revisited periodically.
+      **/
+     HashIdxStream *stream;
+
+     /** We only perform an update of scores and schedule when enough new pages
+      * have been added, otherwise the update thread sleeps */
+     pthread_mutex_t n_pages_mutex;
+     pthread_cond_t n_pages_cond;    /**< Signaled when a page is added */
+     double n_pages_old;             /**< Number of pages when last updated was done */
+     double n_pages_new;             /**< Current number of pages */
+
+     /** The update thread runs in parallel the scorer and updates the schedule
+         when changes in score happen */
+     pthread_t thread;
+     pthread_mutex_t state_mutex;   /**< Sync access to update_state */
+     UpdateThreadState state; /**< See @ref UpdateThreadState */
+} UpdateThread;
+
 typedef struct {
      /** Page database
       *
@@ -66,7 +89,7 @@ typedef struct {
      /** The scorer use to get page score.
       *
       * If not set up, the PageInfo.score will be used */
-     Scorer scorer;
+     Scorer *scorer;
 
      /** The scheduler state is maintained inside am LMDB environment */
      TxnManager *txn_manager;
@@ -76,30 +99,9 @@ typedef struct {
       **/
      char *path;
 
-     /** An stream of Hash/Index pairs.
-      *
-      * This is necessary because page scores can change. This is stream is used
-      * to make sure all page scores are revisited periodically.
-      **/
-     HashIdxStream *stream;
+     UpdateThread *update_thread;
 
      Error *error;
-
-// Update thread
-// -----------------------------------------------------------------------------
-     /** We only perform an update of scores and schedule when enough new pages
-      * have been added, otherwise the update thread sleeps */
-     pthread_mutex_t n_pages_mutex;
-     pthread_cond_t n_pages_cond;    /**< Signaled when a page is added */
-     double n_pages_old;             /**< Number of pages when last updated was done */
-     double n_pages_new;             /**< Current number of pages */
-
-     /** The update thread runs in parallel the scorer and updates the schedule
-         when changes in score happen */
-     pthread_t update_thread;
-     pthread_mutex_t update_mutex;   /**< Sync access to update_state */
-     UpdateThreadState update_state; /**< See @ref UpdateThreadState */
-
 // Options
 // -----------------------------------------------------------------------------
      /** If true, do not delete files after deleting object*/
