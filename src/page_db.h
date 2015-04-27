@@ -326,6 +326,10 @@ page_db_get_idx(PageDB *db, uint64_t hash, uint64_t *idx);
 /** Close database, delete files if it should not be persisted, and free memory */
 PageDBError
 page_db_delete(PageDB *db);
+
+/** Set persist option for database */
+void
+page_db_set_persist(PageDB *db, int value);
 /// @}
 
 /// @addtogroup LinkStream

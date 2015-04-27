@@ -158,6 +158,11 @@ bf_scheduler_update_start(BFScheduler *sch);
 /** Stop the update thread */
 BFSchedulerError
 bf_scheduler_update_stop(BFScheduler *sch);
+
+/** Set persist option for scheduler */
+void
+bf_scheduler_set_persist(BFScheduler *sch, int value);
+
 /// @}
 
 #if (defined TEST) && TEST

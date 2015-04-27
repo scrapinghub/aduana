@@ -957,6 +957,12 @@ page_db_delete(PageDB *db) {
      free(db);
      return 0;
 }
+
+/** Set persist option for database */
+void
+page_db_set_persist(PageDB *db, int value) {
+     db->persist = value;
+}
 /// @}
 
 

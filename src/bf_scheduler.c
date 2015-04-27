@@ -643,7 +643,11 @@ on_error:
      return sch->error->code;
 }
 
-/** Close scheduler */
+void
+bf_scheduler_set_persist(BFScheduler *sch, int value) {
+     sch->persist = value;
+}
+
 void
 bf_scheduler_delete(BFScheduler *sch) {
      if (sch->update_state != update_thread_none) {
