@@ -261,7 +261,7 @@ page_info_update(PageInfo *pi, const CrawledPage *cp) {
 /** Serialize the PageInfo into a contiguos block of memory.
  *
  * Note that enough new memory will be allocated inside val.mv_data to contain
- * the results of the dump. This memory should be freed when no longer is 
+ * the results of the dump. This memory should be freed when no longer is
  * necessary (for example after an mdb_cursor_put).
  *
  * @param pi The PageInfo to be serialized
@@ -285,15 +285,32 @@ page_info_dump(const PageInfo *pi, MDB_val *val) {
      size_t i = 0;
      size_t j;
      char * s;
+     /* To save space we apply the following 'compression' method:
+        1. If n_crawls > 1 all data is saved
+        2. If n_crawls = 1 we have the following constraints:
+               last_crawl = first_crawl
+               n_changes  = 0
+           And so we don't bother to store last_crawl and n_changes
+        3. If n_crawls = 0, which is the very common case of an uncrawled page:
+               first_crawl         = 0
+               last_crawl          = 0
+               n_changes           = 0
+               content_hash_length = 0
+               content_hash        = NULL
+     */
 #define PAGE_INFO_WRITE(x) for (j=0, s=(char*)&(x); j<sizeof(x); data[i++] = s[j++])
-     PAGE_INFO_WRITE(pi->first_crawl);
-     PAGE_INFO_WRITE(pi->last_crawl);
-     PAGE_INFO_WRITE(pi->n_changes);
-     PAGE_INFO_WRITE(pi->n_crawls);
-     PAGE_INFO_WRITE(pi->score);
-     PAGE_INFO_WRITE(pi->content_hash_length);
      for (j=0; j<url_size; data[i++] = pi->url[j++]);
-     for (j=0; j<pi->content_hash_length; data[i++] = pi->content_hash[j++]);
+     PAGE_INFO_WRITE(pi->score);
+     PAGE_INFO_WRITE(pi->n_crawls);
+     if (pi->n_crawls > 0) {
+          PAGE_INFO_WRITE(pi->first_crawl);
+          if (pi->n_crawls > 1) {
+               PAGE_INFO_WRITE(pi->last_crawl);
+               PAGE_INFO_WRITE(pi->n_changes);
+          }
+          PAGE_INFO_WRITE(pi->content_hash_length);
+          for (j=0; j<pi->content_hash_length; data[i++] = pi->content_hash[j++]);
+     }
 
      return 0;
 }
@@ -305,33 +322,37 @@ page_info_dump(const PageInfo *pi, MDB_val *val) {
  */
 static PageInfo *
 page_info_load(const MDB_val *val) {
-     PageInfo *pi = malloc(sizeof(*pi));
+     PageInfo *pi = calloc(1, sizeof(*pi));
      char *data = val->mv_data;
      size_t i = 0;
      size_t j;
      char * d;
 #define PAGE_INFO_READ(x) for (j=0, d=(char*)&(x); j<sizeof(x); d[j++] = data[i++])
-     PAGE_INFO_READ(pi->first_crawl);
-     PAGE_INFO_READ(pi->last_crawl);
-     PAGE_INFO_READ(pi->n_changes);
-     PAGE_INFO_READ(pi->n_crawls);
-     PAGE_INFO_READ(pi->score);
-     PAGE_INFO_READ(pi->content_hash_length);
-
-     size_t url_size = strlen(data + i) + 1;
+     size_t url_size = strlen(data) + 1;
      if (!(pi->url = malloc(url_size))) {
           free(pi);
           return 0;
      }
      for (j=0; j<url_size; pi->url[j++] = data[i++]);
+     PAGE_INFO_READ(pi->score);
+     PAGE_INFO_READ(pi->n_crawls);
+     if (pi->n_crawls > 0) {
+          PAGE_INFO_READ(pi->first_crawl);
+          if (pi->n_crawls > 1) {
+               PAGE_INFO_READ(pi->last_crawl);
+               PAGE_INFO_READ(pi->n_changes);
+          } else {
+               pi->last_crawl = pi->first_crawl;
+          }
+          PAGE_INFO_READ(pi->content_hash_length);
 
-     if (!(pi->content_hash = malloc(pi->content_hash_length))) {
-          free(pi->url);
-          free(pi);
-          return 0;
+          if (!(pi->content_hash = malloc(pi->content_hash_length))) {
+               free(pi->url);
+               free(pi);
+               return 0;
+          }
+          for (j=0; j<pi->content_hash_length; pi->content_hash[j++] = data[i++]);
      }
-     for (j=0; j<pi->content_hash_length; pi->content_hash[j++] = data[i++]);
-
      return pi;
 }
 
@@ -789,12 +810,21 @@ page_db_add(PageDB *db, const CrawledPage *page, PageInfoList **page_info_list) 
      // store links and commit transaction
      key.mv_size = sizeof(uint64_t);
      key.mv_data = id;
-     val.mv_size = sizeof(uint64_t)*n_links;
-     val.mv_data = id + 1;
+     // the links are stored as deltas starting from the 'from' page, encoded
+     // using varint
+     uint8_t *buf = val.mv_data = malloc(10*n_links);
+     if (!buf) {
+          error = "allocating memory to store links";
+          goto on_error;
+     }
+     for (size_t i=1; i<=n_links; ++i)
+          buf = varint_encode_int64((int64_t)id[i] - (int64_t)id[i-1], buf);
+     val.mv_size = (char*)buf - (char*)val.mv_data;
      if ((mdb_rc = mdb_cursor_put(cur_links, &key, &val, 0)) != 0) {
           error = "storing links";
           goto on_error;
      }
+     free(val.mv_data);
      free(id);
      id = 0;
 
@@ -971,21 +1001,25 @@ page_db_set_persist(PageDB *db, int value) {
 
 static int
 page_db_link_stream_copy_links(PageDBLinkStream *es, MDB_val *key, MDB_val *val) {
-     es->n_to = val->mv_size/sizeof(uint64_t);
-     es->i_to = 0;
-     if (es->n_to > es->m_to) {
-          if ((es->to = (uint64_t*)realloc(es->to, es->n_to*sizeof(uint64_t))) == 0) {
+     // decompressing varints can expand size at most 8x
+     size_t max_size = 8*val->mv_size;
+     if (max_size > es->m_to) {
+          if ((es->to = (uint64_t*)realloc(es->to, max_size*sizeof(uint64_t))) == 0) {
                es->state = stream_state_error;
                return -1;
           }
-          es->m_to = es->n_to;
+          es->m_to = max_size;
      }
-     es->from = *(uint64_t*)key->mv_data;
-
-     uint64_t *links = val->mv_data;
-     for (size_t i=0; i<es->n_to; ++i)
-          es->to[i] = links[i];
-
+     es->i_to = 0;
+     es->n_to = 0;
+     uint64_t id = es->from = *(uint64_t*)key->mv_data;
+     uint8_t *pos = (uint8_t*)val->mv_data;
+     uint8_t *end = pos + val->mv_size/sizeof(uint8_t);
+     while (pos < end) {
+          uint8_t read = 0;
+          es->to[es->n_to++] = id += varint_decode_int64(pos, &read);
+          pos += read;
+     }
      return 0;
 }
 
@@ -1101,7 +1135,6 @@ page_db_link_stream_next(void *st, Link *link) {
      es->state = stream_state_next;
      link->from = es->from;
      link->to = es->to[es->i_to++];
-
      return es->state;
 }
 
