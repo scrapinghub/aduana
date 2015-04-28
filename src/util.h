@@ -2,6 +2,8 @@
 #define __UTIL_H__
 
 #include <pthread.h>
+#include <stdint.h>
+
 #include "lmdb.h"
 
 /** Posible states of a stream.
@@ -106,4 +108,25 @@ build_path(const char *path, const char *fname);
 char *
 make_dir(const char *path);
 
+/** Encode unsigned 64bit integer using varint encoding */
+uint8_t*
+varint_encode_uint64(uint64_t n, uint8_t *out);
+
+/** Decode unsigned 64bit integer using varint encoding */
+uint64_t
+varint_decode_uint64(uint8_t *in, uint8_t* read);
+
+/** Encode signed 64bit integer using varint encoding */
+uint8_t*
+varint_encode_int64(int64_t n, uint8_t *out);
+
+/** Decode signed 64bit integer using varint encoding */
+int64_t
+varint_decode_int64(uint8_t *in, uint8_t* read);
+
+#if (defined TEST) && TEST
+#include "CuTest.h"
+CuSuite *
+test_util_suite(void);
+#endif
 #endif // __UTIL_H__

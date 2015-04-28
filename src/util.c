@@ -5,6 +5,8 @@
 #include <errno.h>
 #include <malloc.h>
 #include <pthread.h>
+#include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 
@@ -21,7 +23,7 @@ error_set_2(Error* error, int code, const char *message) {
      if (pthread_mutex_lock(&error->mtx) != 0)
           return;
      error_set_1(error, code, message);
-     (void)pthread_mutex_unlock(&error->mtx);     
+     (void)pthread_mutex_unlock(&error->mtx);
 }
 
 void
@@ -79,7 +81,7 @@ error_add(Error* error, const char *message) {
                return;
           error_add_aux(error, ": ");
           error_add_aux(error, message);
-          (void)pthread_mutex_unlock(&error->mtx);               
+          (void)pthread_mutex_unlock(&error->mtx);
      }
 }
 
@@ -118,3 +120,101 @@ make_dir(const char *path) {
      }
      return 0;
 }
+
+uint8_t*
+varint_encode_uint64(uint64_t n, uint8_t *out) {
+     do {
+          *(out++) = (n & 0x7F) | 0x80;
+     } while (n >>= 7);
+     *(out - 1) &= 0x7F;
+     return out;
+}
+
+uint64_t
+varint_decode_uint64(uint8_t *in, uint8_t* read) {
+     uint64_t res = 0;
+     uint8_t b = 0;
+     do {
+          res |= (*in & 0x7F) << b;
+          b += 7;
+     } while (*(in++) & 0x80);
+
+     if (read)
+          *read = (b/7);
+     return res;
+}
+
+uint8_t*
+varint_encode_int64(int64_t n, uint8_t *out) {
+     return varint_encode_uint64(n >= 0? 2*n: 2*abs(n) + 1, out);
+}
+int64_t
+varint_decode_int64(uint8_t *in, uint8_t* read) {
+     uint64_t res = varint_decode_uint64(in, read);
+     if (res % 2 == 0)
+          return res/2;
+     else
+          return -((res - 1)/2);
+}
+
+
+#if (defined TEST) && TEST
+#include "CuTest.h"
+
+void
+test_varint_uint64(CuTest *tc) {
+     uint64_t test[] = {
+          1000000, 10000, 100, 1, 0
+     };
+     size_t test_length = sizeof(test)/sizeof(uint64_t);
+
+     uint8_t buf[10*test_length];
+     uint8_t *next = buf;
+     for (size_t i=0; i<test_length; ++i)
+          next = varint_encode_uint64(test[i], next);
+
+     uint8_t read = 0;
+     next = buf;
+     for (size_t i=0; i<test_length; ++i) {
+          CuAssertIntEquals(tc,
+                            test[i],
+                            varint_decode_uint64(next, &read));
+          next += read;
+     }
+
+
+}
+void
+test_varint_int64(CuTest *tc) {
+     int64_t test[] = {
+          -1000000, 10000, -100, 1, 0
+     };
+     size_t test_length = sizeof(test)/sizeof(uint64_t);
+
+     uint8_t buf[10*test_length];
+     uint8_t *next = buf;
+     for (size_t i=0; i<test_length; ++i)
+          next = varint_encode_int64(test[i], next);
+
+     uint8_t read = 0;
+     next = buf;
+     for (size_t i=0; i<test_length; ++i) {
+          CuAssertIntEquals(tc,
+                            test[i],
+                            varint_decode_int64(next, &read));
+          next += read;
+     }
+
+
+}
+
+CuSuite *
+test_util_suite(void) {
+     CuSuite *suite = CuSuiteNew();
+     SUITE_ADD_TEST(suite, test_varint_uint64);
+     SUITE_ADD_TEST(suite, test_varint_int64);
+
+     return suite;
+}
+
+#endif // TEST
