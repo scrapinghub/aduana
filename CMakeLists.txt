@@ -14,6 +14,9 @@ set(CMAKE_C_FLAGS_RELEASE  "${CMAKE_C_FLAGS_RELEASE} -O3")
 add_library(xxhash SHARED
   lib/xxhash.c
 )
+add_library(smaz SHARED
+  lib/smaz.c
+)
 include_directories(
   lib
 )
@@ -42,7 +45,7 @@ add_library(pagedb SHARED
   src/txn_manager.c
 )
 include_directories(src)
-target_link_libraries(pagedb lmdb xxhash)
+target_link_libraries(pagedb lmdb xxhash smaz)
 target_link_libraries(pagedb pthread)
 
 # Benchmarks

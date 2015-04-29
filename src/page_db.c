@@ -3,6 +3,7 @@
 #define _GNU_SOURCE 1
 
 #include <errno.h>
+#include <limits.h>
 #include <malloc.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -11,6 +12,7 @@
 #include <time.h>
 
 #include "lmdb.h"
+#include "smaz.h"
 #include "xxhash.h"
 
 #include "page_db.h"
@@ -272,19 +274,6 @@ page_info_update(PageInfo *pi, const CrawledPage *cp) {
  */
 static int
 page_info_dump(const PageInfo *pi, MDB_val *val) {
-     size_t url_size = strlen(pi->url) + 1;
-     val->mv_size =
-          sizeof(pi->first_crawl) + sizeof(pi->last_crawl) + sizeof(pi->n_changes) +
-          sizeof(pi->n_crawls) + sizeof(pi->score) + sizeof(pi->content_hash_length) + url_size +
-          pi->content_hash_length;
-
-     char *data = val->mv_data = malloc(val->mv_size);
-     if (!data)
-          return -1;
-
-     size_t i = 0;
-     size_t j;
-     char * s;
      /* To save space we apply the following 'compression' method:
         1. If n_crawls > 1 all data is saved
         2. If n_crawls = 1 we have the following constraints:
@@ -298,8 +287,34 @@ page_info_dump(const PageInfo *pi, MDB_val *val) {
                content_hash_length = 0
                content_hash        = NULL
      */
+
+     // necessary size except for the URL, which we don't know yet how much is going
+     // to cost storing
+     val->mv_size = sizeof(pi->score) + sizeof(pi->n_crawls);
+     if (pi->n_crawls > 0) {
+          val->mv_size += sizeof(pi->first_crawl) +
+               pi->content_hash_length + sizeof(pi->content_hash_length);
+          if (pi->n_crawls > 1)
+               val->mv_size += sizeof(pi->last_crawl) + sizeof(pi->n_changes);
+     }
+
+     size_t url_size = strlen(pi->url);
+     char *data = val->mv_data = malloc(val->mv_size + 4*url_size);
+     if (!data)
+          return -1;
+
+     size_t curl_size = (size_t)smaz_compress(
+          pi->url, url_size, data + sizeof(unsigned short), 4*url_size);
+     if (curl_size > 4*url_size) // TODO
+          return -1;
+     ((unsigned short*)data)[0] = curl_size;
+     val->mv_size += sizeof(unsigned short) + curl_size;
+
+
+     size_t i = sizeof(unsigned short) + curl_size;
+     size_t j;
+     char * s;
 #define PAGE_INFO_WRITE(x) for (j=0, s=(char*)&(x); j<sizeof(x); data[i++] = s[j++])
-     for (j=0; j<url_size; data[i++] = pi->url[j++]);
      PAGE_INFO_WRITE(pi->score);
      PAGE_INFO_WRITE(pi->n_crawls);
      if (pi->n_crawls > 0) {
@@ -328,12 +343,27 @@ page_info_load(const MDB_val *val) {
      size_t j;
      char * d;
 #define PAGE_INFO_READ(x) for (j=0, d=(char*)&(x); j<sizeof(x); d[j++] = data[i++])
-     size_t url_size = strlen(data) + 1;
-     if (!(pi->url = malloc(url_size))) {
-          free(pi);
-          return 0;
-     }
-     for (j=0; j<url_size; pi->url[j++] = data[i++]);
+     unsigned short curl_size;
+     PAGE_INFO_READ(curl_size);
+
+     unsigned short url_size = 4*curl_size + 1;
+     int enough_memory = 0;
+     do {
+          if (!(pi->url = realloc(pi->url, url_size))) {
+               free(pi);
+               return 0;
+          }
+          int dec = smaz_decompress(data + i, curl_size, pi->url, url_size);
+          if ((unsigned int)dec < url_size) {
+               enough_memory = 1;
+               url_size = dec;
+          } else {
+               url_size *= 2;
+          }
+     } while (!enough_memory);
+     pi->url[url_size] = '\0';
+     i += curl_size;
+
      PAGE_INFO_READ(pi->score);
      PAGE_INFO_READ(pi->n_crawls);
      if (pi->n_crawls > 0) {
