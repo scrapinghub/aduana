@@ -1083,9 +1083,13 @@ page_db_get_scores(PageDB *db, MMapArray **scores) {
           init = 0;
      } while (more_pages);
 
+     if (txn)
+          txn_manager_abort(db->txn_manager, txn);
      free(pscores);
      return 0;
 on_error:
+     if (txn)
+          txn_manager_abort(db->txn_manager, txn);
      free(pscores);
      page_db_set_error(db, page_db_error_internal, __func__);
      page_db_add_error(db, error1);
