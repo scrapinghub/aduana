@@ -17,14 +17,21 @@ typedef enum {
 
 } MMapArrayError;
 
+#define MMAP_ARRAY_DEFAULT_PERSIST 0 /**< Default value for @ref MMapArray::persist */
 /** A memory mapped array */
 typedef struct {
      char *mem;            /**< Pointer to data */
      int fd;               /**< File descriptor for data */
+     char *path;           /**< Path to data file */
      size_t n_elements;    /**< Number of elements */
      size_t element_size;  /**< Size of each element */
 
      Error *error;
+
+// Options
+// -----------------------------------------------------------------------------
+     /** If true, do not delete files after deleting object*/
+     int persist;
 } MMapArray;
 
 /** Create a new MMapArray
@@ -38,9 +45,9 @@ typedef struct {
  */
 MMapArrayError
 mmap_array_new(MMapArray **marr,
-	       const char *path,
-	       size_t n_elements,
-	       size_t element_size);
+               const char *path,
+               size_t n_elements,
+               size_t element_size);
 
 /** Delete MMapArray
  *

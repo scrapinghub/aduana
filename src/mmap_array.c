@@ -52,12 +52,22 @@ mmap_array_new(MMapArray **marr,
           free(p);
           return mmap_array_error_memory;
      }
+     if (path) {
+          if (!(p->path = strdup(path))) {
+               free(p->error);
+               free(p);
+               return mmap_array_error_memory;
+          }
+     } else {
+          p->path = 0;
+     }
      // resizing works by doubling current size
      if (n_elements == 0)
           n_elements = 1;
 
      p->n_elements = n_elements;
      p->element_size = element_size;
+     p->persist = MMAP_ARRAY_DEFAULT_PERSIST;
 
      char *error = 0;
      int errno_cp = 0;
@@ -159,12 +169,20 @@ mmap_array_delete(MMapArray *marr) {
           error = "munmap";
           goto on_error;
      }
-     if (marr->fd != -1 && close(marr->fd) != 0) {
-          errno_cp = errno;
-          error = "closing file descriptor";
-          goto on_error;
+     if (marr->fd != -1) {
+          if (close(marr->fd) != 0) {
+               errno_cp = errno;
+               error = "closing file descriptor";
+               goto on_error;
+          }
+          if (!marr->persist && (remove(marr->path) != 0)) {
+               errno_cp = errno;
+               error = "deleting associated file";
+               goto on_error;
+          }
      }
 
+     free(marr->path);
      error_delete(marr->error);
      free(marr);
      return 0;
