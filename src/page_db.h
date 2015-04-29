@@ -171,7 +171,7 @@ typedef struct {
 int
 page_info_print(const PageInfo *pi, char *out);
 
-/** Estimate change rate of the given page. If no valid rate can be computed 
+/** Estimate change rate of the given page. If no valid rate can be computed
  * return -1.0, otherwise a valid nonnegative change rate. */
 float
 page_info_rate(const PageInfo *pi);
@@ -206,7 +206,7 @@ page_info_list_new(PageInfo *pi, uint64_t hash);
  * @param hash
  *
  * @return A pointer to the first element of the list, or NULL if failure
- * */ 
+ * */
 PageInfoList *
 page_info_list_cons(PageInfoList *pil, PageInfo *pi, uint64_t hash);
 
@@ -248,22 +248,22 @@ typedef enum {
 typedef struct {
      /** Path to the database directory */
      char *path;
-     /** The transaction manager counts the number of read and write 
-         transactions active and is capable of safely performing a 
+     /** The transaction manager counts the number of read and write
+         transactions active and is capable of safely performing a
          database resize */
      TxnManager* txn_manager;
 
      Error *error;
 
 // Options
-// -----------------------------------------------------------------------------     
+// -----------------------------------------------------------------------------
      /** If true, do not delete files after deleting object*/
      int persist;
 } PageDB;
 
 
 /** Hash function used to convert from URL to hash */
-uint64_t 
+uint64_t
 page_db_hash(const char *url);
 
 
@@ -302,8 +302,8 @@ page_db_new(PageDB **db, const char *path);
  *
  * @param db The database to update
  * @param page The information of the crawled page
- * @param page_info_list If not NULL this function will allocate and populate a new 
- *                       @ref PageInfoList which contains the @ref PageInfo of the updated pages. 
+ * @param page_info_list If not NULL this function will allocate and populate a new
+ *                       @ref PageInfoList which contains the @ref PageInfo of the updated pages.
  *                       It is your responsability to call @page_info_list_delete when you no
  *                       longer need this structure.
  * @return 0 if success, otherwise the error code
@@ -322,6 +322,10 @@ page_db_get_info(PageDB *db, uint64_t hash, PageInfo **pi);
 /** Get index for the given URL */
 PageDBError
 page_db_get_idx(PageDB *db, uint64_t hash, uint64_t *idx);
+
+/** Build a MMapArray with all the scores */
+PageDBError
+page_db_get_scores(PageDB *db, MMapArray **scores);
 
 /** Close database, delete files if it should not be persisted, and free memory */
 PageDBError
@@ -381,7 +385,7 @@ page_db_link_stream_delete(PageDBLinkStream *es);
 /** Stream over hash/index pairs inside PageDB */
 typedef struct {
      PageDB *db;
-     MDB_cursor *cur;   /**< Cursor to the hash2idx database */     
+     MDB_cursor *cur;   /**< Cursor to the hash2idx database */
      StreamState state;
 } HashIdxStream;
 

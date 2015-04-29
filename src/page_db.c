@@ -330,6 +330,15 @@ page_info_dump(const PageInfo *pi, MDB_val *val) {
      return 0;
 }
 
+// fast retrieval of just the score associated with the page
+static float
+page_info_dump_get_score(MDB_val *val) {
+     char *data = val->mv_data;
+     unsigned short curl_size = ((unsigned short*)data)[0];
+     data += sizeof(unsigned short) + curl_size;
+     return *((float*)data);
+}
+
 /** Create a new PageInfo loading the information from a previously
  * dumped PageInfo inside val.
  *
@@ -931,6 +940,32 @@ on_error:
      return db->error->code;
 }
 
+static PageDBError
+page_db_get_idx_cur(PageDB *db, MDB_cursor *cur, uint64_t hash, uint64_t *idx) {
+     int mdb_rc = 0;
+
+     MDB_val key = {
+          .mv_size = sizeof(uint64_t),
+          .mv_data = &hash
+     };
+     MDB_val val;
+     switch (mdb_rc = mdb_cursor_get(cur, &key, &val, MDB_SET)) {
+     case 0:
+          *idx = *(uint64_t*)val.mv_data;
+          return 0;
+
+     case MDB_NOTFOUND:
+          *idx = 0;
+          return page_db_error_no_page;
+
+     default:
+          page_db_set_error(db, page_db_error_internal, __func__);
+          page_db_add_error(db, "retrieving val from hash2info");
+          page_db_add_error(db, mdb_strerror(mdb_rc));
+          return db->error->code;
+     }
+}
+
 PageDBError
 page_db_get_idx(PageDB *db, uint64_t hash, uint64_t *idx) {
      MDB_txn *txn = 0;
@@ -939,52 +974,126 @@ page_db_get_idx(PageDB *db, uint64_t hash, uint64_t *idx) {
      int mdb_rc;
      int ret = 0;
      char *error = 0;
-     if (txn_manager_begin(db->txn_manager, MDB_RDONLY, &txn) != 0) {
+     if (txn_manager_begin(db->txn_manager, MDB_RDONLY, &txn) != 0)
           error = db->txn_manager->error->message;
-          goto on_error;
      // open hash2info database
-     } else if ((mdb_rc = page_db_open_hash2idx(txn, &cur)) != 0) {
+     else if ((mdb_rc = page_db_open_hash2idx(txn, &cur)) != 0)
           error = "opening hash2idx database";
-          goto on_error;
+
+     if (error) {
+          page_db_set_error(db, page_db_error_internal, __func__);
+          page_db_add_error(db, error);
+          if (mdb_rc != 0)
+               page_db_add_error(db, mdb_strerror(mdb_rc));
+
+          ret = page_db_error_internal;
      }
      else {
-          MDB_val key = {
-               .mv_size = sizeof(uint64_t),
-               .mv_data = &hash
-          };
-          MDB_val val;
-          switch (mdb_rc = mdb_cursor_get(cur, &key, &val, MDB_SET)) {
-          case 0:
-               *idx = *(uint64_t*)val.mv_data;
-               ret = 0;
-               goto on_exit;
-          case MDB_NOTFOUND:
-               *idx = 0;
-               ret = page_db_error_no_page;
-               goto on_exit;
-          default:
-               error = "retrieving val from hash2info";
-               goto on_error;
-               break;
-          }
+          ret = page_db_get_idx_cur(db, cur, hash, idx);
      }
-on_exit:
      if (cur)
           mdb_cursor_close(cur);
      if (txn)
           txn_manager_abort(db->txn_manager, txn);
      return ret;
+}
 
+PageDBError
+page_db_get_scores(PageDB *db, MMapArray **scores) {
+     MDB_txn *txn;
+
+     MDB_cursor *cur_hash2info;
+     MDB_cursor *cur_hash2idx;
+     MDB_cursor *cur_info;
+
+     MDB_val key;
+     MDB_val val;
+
+     int mdb_rc = 0;
+     char *error1 = 0;
+     char *error2 = 0;
+
+     if ((txn_manager_begin(db->txn_manager, MDB_RDONLY, &txn)) != 0)
+          error1 = db->txn_manager->error->message;
+     else if ((mdb_rc = page_db_open_hash2info(txn, &cur_hash2info)) != 0)
+          error1 = "opening hash2info cursor";
+     else if ((mdb_rc = page_db_open_hash2idx(txn, &cur_hash2idx)) != 0)
+          error1 = "opening hash2idx cursor";
+     else if ((mdb_rc = page_db_open_info(txn, &cur_info)) != 0)
+          error1 = "opening info cursor";
+
+     if (error1)
+          goto on_error;
+
+     // get n_pages
+     key.mv_size = sizeof(info_n_pages);
+     key.mv_data = info_n_pages;
+     if ((mdb_rc = mdb_cursor_get(cur_info, &key, &val, MDB_SET)) != 0) {
+          error1 = "retrieving info.n_pages";
+          error2 = mdb_strerror(mdb_rc);
+          goto on_error;
+     }
+     size_t n_pages = *(size_t*)val.mv_data;
+
+     char *pscores = build_path(db->path, "scores.bin");
+     if (mmap_array_new(scores, pscores, n_pages, sizeof(float)) != 0) {
+          error1 = "creating scores array";
+          error2 = *scores? (*scores)->error->message: "memory error";
+          goto on_error;
+     }
+
+     int init = 1;
+     int more_pages = 1;
+     do {
+          uint64_t hash;
+          float score;
+          size_t idx;
+          switch (mdb_rc = mdb_cursor_get(cur_hash2info,
+                                          &key,
+                                          &val,
+                                          init? MDB_FIRST: MDB_NEXT)) {
+          case 0:
+               hash = *(uint64_t*)key.mv_data;
+               score = page_info_dump_get_score(&val);
+               switch (page_db_get_idx_cur(db, cur_hash2idx, hash, &idx)) {
+               case 0:
+                    if (mmap_array_set(*scores, idx, &score) != 0) {
+                         error1 = "setting score";
+                         error2 = (*scores)->error->message;
+                         goto on_error;
+                    }
+                    break;
+               case page_db_error_no_page:
+                    // ignore
+                    break;
+               default:
+                    error1 = db->error->message;
+                    goto on_error;
+               }
+               break;
+          case MDB_NOTFOUND:
+               more_pages = 0;
+               break; // end loop
+          default:
+               error1 = "iterating on hash2info";
+               error2 = mdb_strerror(mdb_rc);
+               goto on_error;
+          }
+
+          init = 0;
+     } while (more_pages);
+
+     free(pscores);
+     return 0;
 on_error:
-     if (txn)
-          txn_manager_abort(db->txn_manager, txn);
+     free(pscores);
      page_db_set_error(db, page_db_error_internal, __func__);
-     page_db_add_error(db, error);
-     if (mdb_rc != 0)
-          page_db_add_error(db, mdb_strerror(mdb_rc));
+     page_db_add_error(db, error1);
+     page_db_add_error(db, error2);
 
      return db->error->code;
 }
+
 
 /** Close database */
 PageDBError
