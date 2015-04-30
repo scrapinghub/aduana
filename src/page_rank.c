@@ -120,12 +120,6 @@ page_rank_delete(PageRank *pr) {
      } else if (mmap_array_delete(pr->value2) != 0) {
           error1 = "deleting value2";
           error2 = pr->value2->error->message;
-     } else if (!pr->persist && (remove(pr->path_out_degree) != 0)) {
-          error1 = "deleting out_degree file";
-          error2 = strerror(errno);
-     } else if (!pr->persist && (remove(pr->path_pr) != 0)) {
-          error1 = "deleting pr file";
-          error2 = strerror(errno);
      } else {
           free(pr->path_out_degree);
           free(pr->path_pr);
@@ -435,4 +429,10 @@ page_rank_get(const PageRank *pr, size_t idx, float *score_old, float *score_new
      *score_new = *pr_score_new;
      *score_old = *pr_score_old;
      return 0;
+}
+
+void
+page_rank_set_persist(PageRank *pr, int value) {
+     pr->persist = pr->out_degree->persist =
+          pr->value1->persist = pr->value2->persist = value;
 }

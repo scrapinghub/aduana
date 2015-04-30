@@ -160,6 +160,7 @@ varint_decode_int64(uint8_t *in, uint8_t* read) {
 
 #if (defined TEST) && TEST
 #include "CuTest.h"
+#include "test.h"
 
 void
 test_varint_uint64(CuTest *tc) {
@@ -209,7 +210,7 @@ test_varint_int64(CuTest *tc) {
 }
 
 CuSuite *
-test_util_suite(void) {
+test_util_suite() {
      CuSuite *suite = CuSuiteNew();
      SUITE_ADD_TEST(suite, test_varint_uint64);
      SUITE_ADD_TEST(suite, test_varint_int64);

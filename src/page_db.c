@@ -1041,47 +1041,38 @@ page_db_get_scores(PageDB *db, MMapArray **scores) {
           error2 = *scores? (*scores)->error->message: "memory error";
           goto on_error;
      }
+     mmap_array_zero(*scores);
 
-     int init = 1;
-     int more_pages = 1;
-     do {
-          uint64_t hash;
-          float score;
+     for (mdb_rc = mdb_cursor_get(cur_hash2info, &key, &val, MDB_FIRST);
+          mdb_rc == 0;
+          mdb_rc = mdb_cursor_get(cur_hash2info, &key, &val, MDB_NEXT)) {
+
+          uint64_t hash = *(uint64_t*)key.mv_data;
+          float score = page_info_dump_get_score(&val);
+
           size_t idx;
-          switch (mdb_rc = mdb_cursor_get(cur_hash2info,
-                                          &key,
-                                          &val,
-                                          init? MDB_FIRST: MDB_NEXT)) {
+          switch (page_db_get_idx_cur(db, cur_hash2idx, hash, &idx)) {
           case 0:
-               hash = *(uint64_t*)key.mv_data;
-               score = page_info_dump_get_score(&val);
-               switch (page_db_get_idx_cur(db, cur_hash2idx, hash, &idx)) {
-               case 0:
-                    if (mmap_array_set(*scores, idx, &score) != 0) {
-                         error1 = "setting score";
-                         error2 = (*scores)->error->message;
-                         goto on_error;
-                    }
-                    break;
-               case page_db_error_no_page:
-                    // ignore
-                    break;
-               default:
-                    error1 = db->error->message;
+               if (mmap_array_set(*scores, idx, &score) != 0) {
+                    error1 = "setting score";
+                    error2 = (*scores)->error->message;
                     goto on_error;
                }
                break;
-          case MDB_NOTFOUND:
-               more_pages = 0;
-               break; // end loop
+          case page_db_error_no_page:
+               // ignore
+               break;
           default:
-               error1 = "iterating on hash2info";
-               error2 = mdb_strerror(mdb_rc);
+               error1 = db->error->message;
                goto on_error;
           }
 
-          init = 0;
-     } while (more_pages);
+     }
+     if (mdb_rc != MDB_NOTFOUND) {
+          error1 = "iterating on hash2info";
+          error2 = mdb_strerror(mdb_rc);
+          goto on_error;
+     }
 
      if (txn)
           txn_manager_abort(db->txn_manager, txn);
@@ -1362,6 +1353,7 @@ hashidx_stream_delete(HashIdxStream *st) {
 
 #if (defined TEST) && TEST
 #include "CuTest.h"
+#include "test.h"
 
 /* Tests the loading/dumping of PageInfo from and into LMDB values */
 void
@@ -1379,6 +1371,7 @@ test_page_info_serialization(CuTest *tc) {
      };
 
      CuAssertTrue(tc, page_info_dump(&pi1, &val) == 0);
+     CuAssertDblEquals(tc, 0.7, page_info_dump_get_score(&val), 1e-6);
 
      PageInfo *pi2 = page_info_load(&val);
      CuAssertPtrNotNull(tc, pi2);
@@ -1420,7 +1413,7 @@ test_page_db_simple(CuTest *tc) {
      crawled_page_add_link(cp2, "x", 1.1);
      crawled_page_add_link(cp2, "y", 1.2);
      crawled_page_set_hash64(cp2, 2000);
-     cp1->score = 0.2;
+     cp2->score = 0.2;
 
      PageInfoList *pil;
      CuAssert(tc,
@@ -1438,6 +1431,34 @@ test_page_db_simple(CuTest *tc) {
               db->error->message,
               page_db_add(db, cp2, &pil) == 0);
      page_info_list_delete(pil);
+
+     MMapArray *scores = 0;
+     CuAssert(tc,
+              db->error->message,
+              page_db_get_scores(db, &scores) == 0);
+
+     size_t idx;
+     CuAssert(tc,
+              db->error->message,
+              page_db_get_idx(db, page_db_hash("www.yahoo.com"), &idx) == 0);
+     CuAssertDblEquals(
+          tc,
+          0.5,
+          *(float*)mmap_array_idx(scores, idx),
+          1e-6);
+     CuAssert(tc,
+              db->error->message,
+              page_db_get_idx(db, page_db_hash("x"), &idx) == 0);
+     CuAssertDblEquals(
+          tc,
+          1.1,
+          *(float*)mmap_array_idx(scores, idx),
+          1e-6);
+
+
+     CuAssert(tc,
+              scores->error->message,
+              mmap_array_delete(scores) == 0);
 
      crawled_page_delete(cp1);
      crawled_page_delete(cp2);
@@ -1520,9 +1541,8 @@ test_page_db_simple(CuTest *tc) {
      page_db_delete(db);
 }
 
-/* Tests the typical database operations on a moderate crawl of 10M pages */
-void
-test_page_db_large(CuTest *tc) {
+static void
+test_page_db_crawl(CuTest *tc, size_t n_pages) {
      char test_dir[] = "test-pagedb-XXXXXX";
      mkdtemp(test_dir);
 
@@ -1533,7 +1553,6 @@ test_page_db_large(CuTest *tc) {
      db->persist = 0;
 
      const size_t n_links = 10;
-     const size_t n_pages = 10000000;
 
      LinkInfo links[n_links + 1];
      for (size_t j=0; j<=n_links; ++j) {
@@ -1597,6 +1616,18 @@ test_page_db_large(CuTest *tc) {
      page_db_link_stream_delete(st);
 
      page_db_delete(db);
+}
+
+/* Tests the typical database operations on a moderate crawl of 10M pages */
+void
+test_page_db_large(CuTest *tc) {
+     test_page_db_crawl(tc, 10000000);
+}
+
+/* Tests the typical database operations on a big crawl of 100M pages */
+void
+test_page_db_very_large(CuTest *tc) {
+     test_page_db_crawl(tc, 100000000);
 }
 
 /* Checks the accuracy of the HITS computation */
@@ -1899,13 +1930,17 @@ test_hashidx_stream(CuTest *tc) {
 }
 
 CuSuite *
-test_page_db_suite(void) {
+test_page_db_suite(TestOps ops) {
      CuSuite *suite = CuSuiteNew();
      SUITE_ADD_TEST(suite, test_page_info_serialization);
      SUITE_ADD_TEST(suite, test_page_db_simple);
      SUITE_ADD_TEST(suite, test_page_db_hits);
      SUITE_ADD_TEST(suite, test_page_db_page_rank);
-     SUITE_ADD_TEST(suite, test_page_db_large);
+     if (ops == test_all || ops == test_large)
+          SUITE_ADD_TEST(suite, test_page_db_large);
+     if (ops == test_all)
+          SUITE_ADD_TEST(suite, test_page_db_very_large);
+
      SUITE_ADD_TEST(suite, test_hashidx_stream);
 
      return suite;

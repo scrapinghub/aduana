@@ -170,7 +170,7 @@ bf_scheduler_set_persist(BFScheduler *sch, int value);
 #if (defined TEST) && TEST
 #include "CuTest.h"
 CuSuite *
-test_bf_scheduler_suite(void);
+test_bf_scheduler_suite(TestOps ops);
 #endif
 
 #endif // __BF_SCHEDULER_H__

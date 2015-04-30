@@ -71,5 +71,7 @@ hits_get_authority(const Hits *pr,
                    float *score_old,
                    float *score_new);
 
+void
+hits_set_persist(Hits *hits, int value);
 /// @}
 #endif // _HITS_H

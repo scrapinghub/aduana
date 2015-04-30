@@ -678,6 +678,7 @@ bf_scheduler_delete(BFScheduler *sch) {
 
 #if (defined TEST) && TEST
 #include "CuTest.h"
+#include "test.h"
 
 void
 test_bf_scheduler_requests(CuTest *tc) {
@@ -792,9 +793,60 @@ test_bf_scheduler_requests(CuTest *tc) {
      free(crawl);
 }
 
+static void
+test_bf_scheduler_crawl(CuTest *tc,
+                        BFScheduler *sch,
+                        size_t n_pages) {
+     const size_t n_links = 10;
+
+     LinkInfo links[n_links + 1];
+     for (size_t j=0; j<=n_links; ++j) {
+          sprintf(links[j].url = malloc(50), "test_url_%zu", j);
+          links[j].score = ((float)j)/((float)n_pages);
+     }
+
+     time_t start = time(0);
+     printf("%s: \n", __func__);
+     for (size_t i=0; i<n_pages; ++i) {
+#if 1
+          if (i % 10000 == 0) {
+               double delta = difftime(time(0), start);
+               if (delta > 0) {
+                    printf("%10zuK/%zuM: %9zu pages/sec\n",
+                           i/1000, n_pages/1000000, i/((size_t)delta));
+               }
+          }
+#endif
+          free(links[0].url);
+          for (size_t j=0; j<n_links; ++j)
+               links[j] = links[j+1];
+          sprintf(links[n_links].url = malloc(50), "test_url_%zu", i + n_links);
+          links[n_links].score = ((float)i)/((float)n_pages);
+
+          CrawledPage *cp = crawled_page_new(links[0].url);
+          for (size_t j=1; j<=n_links; ++j)
+               crawled_page_add_link(cp, links[j].url, 0.5);
+
+          CuAssert(tc,
+                   sch->error->message,
+                   bf_scheduler_add(sch, cp) == 0);
+          crawled_page_delete(cp);
+
+          if (i % 10 == 0) {
+               PageRequest *req;
+               CuAssert(tc,
+                        sch->error->message,
+                        bf_scheduler_request(sch, 10, &req) == 0);
+               page_request_delete(req);
+          }
+     }
+     for (size_t j=0; j<=n_links; ++j)
+          free(links[j].url);
+}
+
 /* Tests the typical database operations on a moderate crawl of 10M pages */
-void
-test_bf_scheduler_large_page_rank(CuTest *tc) {
+static void
+test_bf_scheduler_page_rank(CuTest *tc, size_t n_pages) {
      char test_dir_db[] = "test-bfs-XXXXXX";
      mkdtemp(test_dir_db);
 
@@ -818,52 +870,7 @@ test_bf_scheduler_large_page_rank(CuTest *tc) {
      page_rank_scorer_setup(scorer, sch->scorer);
      bf_scheduler_update_start(sch);
 
-     const size_t n_links = 10;
-     const size_t n_pages = 10000000;
-
-     LinkInfo links[n_links + 1];
-     for (size_t j=0; j<=n_links; ++j) {
-          sprintf(links[j].url = malloc(50), "test_url_%zu", j);
-          links[j].score = j;
-     }
-
-     time_t start = time(0);
-     printf("%s: \n", __func__);
-     for (size_t i=0; i<n_pages; ++i) {
-#if 1
-          if (i % 10000 == 0) {
-               double delta = difftime(time(0), start);
-               if (delta > 0) {
-                    printf("%10zuK/%zuM: %9zu pages/sec\n",
-                           i/1000, n_pages/1000000, i/((size_t)delta));
-               }
-          }
-#endif
-          free(links[0].url);
-          for (size_t j=0; j<n_links; ++j)
-               links[j] = links[j+1];
-          sprintf(links[n_links].url = malloc(50), "test_url_%zu", i + n_links);
-          links[n_links].score = i;
-
-          CrawledPage *cp = crawled_page_new(links[0].url);
-          for (size_t j=1; j<=n_links; ++j)
-               crawled_page_add_link(cp, links[j].url, 0.5);
-
-          CuAssert(tc,
-                   sch->error->message,
-                   bf_scheduler_add(sch, cp) == 0);
-          crawled_page_delete(cp);
-
-          if (i % 10 == 0) {
-               PageRequest *req;
-               CuAssert(tc,
-                        sch->error->message,
-                        bf_scheduler_request(sch, 10, &req) == 0);
-               page_request_delete(req);
-          }
-     }
-     for (size_t j=0; j<=n_links; ++j)
-          free(links[j].url);
+     test_bf_scheduler_crawl(tc, sch, n_pages);
 
      bf_scheduler_update_stop(sch);
      bf_scheduler_delete(sch);
@@ -871,9 +878,19 @@ test_bf_scheduler_large_page_rank(CuTest *tc) {
      page_db_delete(db);
 }
 
-/* Tests the typical database operations on a moderate crawl of 10M pages */
 void
-test_bf_scheduler_large_hits(CuTest *tc) {
+test_bf_scheduler_large_page_rank(CuTest *tc) {
+     test_bf_scheduler_page_rank(tc, 10000000);
+}
+
+void
+test_bf_scheduler_very_large_page_rank(CuTest *tc) {
+     test_bf_scheduler_page_rank(tc, 100000000);
+}
+
+/* Tests the typical database operations on a moderate crawl of 10M pages */
+static void
+test_bf_scheduler_hits(CuTest *tc, size_t n_pages) {
      char test_dir_db[] = "test-bfs-XXXXXX";
      mkdtemp(test_dir_db);
 
@@ -897,64 +914,36 @@ test_bf_scheduler_large_hits(CuTest *tc) {
      hits_scorer_setup(scorer, sch->scorer);
      bf_scheduler_update_start(sch);
 
-     const size_t n_links = 10;
-     const size_t n_pages = 10000000;
+     test_bf_scheduler_crawl(tc, sch, n_pages);
 
-     LinkInfo links[n_links + 1];
-     for (size_t j=0; j<=n_links; ++j) {
-          sprintf(links[j].url = malloc(50), "test_url_%zu", j);
-          links[j].score = j;
-     }
-
-     time_t start = time(0);
-     printf("%s: \n", __func__);
-     for (size_t i=0; i<n_pages; ++i) {
-#if 1
-          if (i % 10000 == 0) {
-               double delta = difftime(time(0), start);
-               if (delta > 0) {
-                    printf("%10zuK/%zuM: %9zu pages/sec\n",
-                           i/1000, n_pages/1000000, i/((size_t)delta));
-               }
-          }
-#endif
-          free(links[0].url);
-          for (size_t j=0; j<n_links; ++j)
-               links[j] = links[j+1];
-          sprintf(links[n_links].url = malloc(50), "test_url_%zu", i + n_links);
-          links[n_links].score = i;
-
-          CrawledPage *cp = crawled_page_new(links[0].url);
-          for (size_t j=1; j<=n_links; ++j)
-               crawled_page_add_link(cp, links[j].url, 0.5);
-
-          CuAssert(tc,
-                   sch->error->message,
-                   bf_scheduler_add(sch, cp) == 0);
-          crawled_page_delete(cp);
-
-          if (i % 10 == 0) {
-               PageRequest *req;
-               CuAssert(tc,
-                        sch->error->message,
-                        bf_scheduler_request(sch, 10, &req) == 0);
-               page_request_delete(req);
-          }
-     }
-     for (size_t j=0; j<=n_links; ++j)
-          free(links[j].url);
      bf_scheduler_update_stop(sch);
      bf_scheduler_delete(sch);
      hits_scorer_delete(scorer);
      page_db_delete(db);
 }
 
+void
+test_bf_scheduler_large_hits(CuTest *tc) {
+     test_bf_scheduler_hits(tc, 10000000);
+}
+
+void
+test_bf_scheduler_very_large_hits(CuTest *tc) {
+     test_bf_scheduler_hits(tc, 100000000);
+}
+
 CuSuite *
-test_bf_scheduler_suite(void) {
+test_bf_scheduler_suite(TestOps ops) {
      CuSuite *suite = CuSuiteNew();
      SUITE_ADD_TEST(suite, test_bf_scheduler_requests);
-     SUITE_ADD_TEST(suite, test_bf_scheduler_large_page_rank);
-     SUITE_ADD_TEST(suite, test_bf_scheduler_large_hits);
+     if (ops == test_all || ops == test_large) {
+          SUITE_ADD_TEST(suite, test_bf_scheduler_large_page_rank);
+          SUITE_ADD_TEST(suite, test_bf_scheduler_large_hits);
+     }
+     if (ops == test_all) {
+          SUITE_ADD_TEST(suite, test_bf_scheduler_very_large_page_rank);
+          SUITE_ADD_TEST(suite, test_bf_scheduler_very_large_hits);
+     }
 
      return suite;
 }

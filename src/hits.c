@@ -126,12 +126,6 @@ hits_delete(Hits *hits) {
      } else if (mmap_array_delete(hits->a2) != 0) {
           error1 = "deleting a2";
           error2 = hits->a2->error->message;
-     } else if (!hits->persist && (remove(hits->path_h1) != 0)) {
-          error1 = "deleting h1 file";
-          error2 = strerror(errno);
-     } else if (!hits->persist && (remove(hits->path_h2) != 0)) {
-          error1 = "deleting h2 file";
-          error2 = strerror(errno);
      } else {
           free(hits->path_h1);
           free(hits->path_h2);
@@ -363,15 +357,21 @@ hits_get_hub(const Hits *pr,
 }
 
 HitsError
-hits_get_authority(const Hits *pr,
+hits_get_authority(const Hits *hits,
                    size_t idx,
                    float *score_old,
                    float *score_new) {
-     float *a_score_new = mmap_array_idx(pr->a1, idx);
-     float *a_score_old = mmap_array_idx(pr->a2, idx);
+     float *a_score_new = mmap_array_idx(hits->a1, idx);
+     float *a_score_old = mmap_array_idx(hits->a2, idx);
      if (!a_score_new || !a_score_old)
           return hits_error_internal;
      *score_new = *a_score_new;
      *score_old = *a_score_old;
      return 0;
+}
+
+void
+hits_set_persist(Hits *hits, int value) {
+     hits->persist = hits->h1->persist = hits->h2->persist =
+          hits->a1->persist = hits->a2->persist = value;
 }
