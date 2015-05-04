@@ -16,11 +16,18 @@ typedef enum {
      page_rank_scorer_error_precision
 } PageRankScorerError;
 
+#define PAGE_RANK_SCORER_USE_CONTENT_SCORES 0
+#define PAGE_RANK_SCORER_PERSIST 0
+
 typedef struct {
      PageRank *page_rank;
      PageDB *page_db;
 
      Error *error;
+// Options
+// -----------------------------------------------------------------------------
+     int persist;
+     int use_content_scores;
 } PageRankScorer;
 
 PageRankScorerError
@@ -38,6 +45,11 @@ page_rank_scorer_delete(PageRankScorer *prs);
 void
 page_rank_scorer_setup(PageRankScorer *prs, Scorer *scorer);
 
+void
+page_rank_scorer_set_persist(PageRankScorer *prs, int value);
+
+void
+page_rank_scorer_set_use_content_scores(PageRankScorer *prs, int value);
 /// @}
 
 #endif // __PAGE_RANK_SCORER_H__

@@ -38,6 +38,8 @@ page_rank_scorer_new(PageRankScorer **prs, PageDB *db) {
           return p->error->code;
      }
 
+     page_rank_scorer_set_persist(p, PAGE_RANK_SCORER_PERSIST);
+     page_rank_scorer_set_use_content_scores(p, PAGE_RANK_SCORER_USE_CONTENT_SCORES);
      return 0;
 }
 
@@ -55,6 +57,13 @@ page_rank_scorer_update(void *state) {
           goto on_error;
      }
 
+     if (prs->use_content_scores &&
+         (page_db_get_scores(prs->page_db, &prs->page_rank->scores) != 0)) {
+          error1 = "retrieving content scores";
+          error2 = prs->page_db->error->message;
+          goto on_error;
+     }
+
      if (page_rank_compute(prs->page_rank,
                            st,
                            page_db_link_stream_next,
@@ -63,6 +72,14 @@ page_rank_scorer_update(void *state) {
           error2 = prs->page_rank->error->message;
           goto on_error;
      }
+
+     if (prs->use_content_scores &&
+         mmap_array_delete(prs->page_rank->scores) != 0) {
+          error1 = "deleting content scores";
+          error2 = prs->page_rank->scores->error->message;
+          goto on_error;
+     }
+
      page_db_link_stream_delete(st);
      return 0;
 on_error:
@@ -108,6 +125,17 @@ page_rank_scorer_setup(PageRankScorer *prs, Scorer *scorer) {
      scorer->add = page_rank_scorer_add;
      scorer->get = page_rank_scorer_get;
      scorer->update = page_rank_scorer_update;
+}
+
+void
+page_rank_scorer_set_persist(PageRankScorer *prs, int value) {
+     prs->persist = value;
+     page_rank_set_persist(prs->page_rank, value);
+}
+
+void
+page_rank_scorer_set_use_content_scores(PageRankScorer *prs, int value) {
+     prs->use_content_scores = value;
 }
 
 #if (defined TEST) && TEST

@@ -16,11 +16,18 @@ typedef enum {
      hits_scorer_error_precision
 } HitsScorerError;
 
+#define HITS_SCORER_USE_CONTENT_SCORES 0
+#define HITS_SCORER_PERSIST 0
+
 typedef struct {
      Hits *hits;
      PageDB *page_db;
 
      Error *error;
+// Options
+// -----------------------------------------------------------------------------
+     int persist;
+     int use_content_scores;
 } HitsScorer;
 
 HitsScorerError
@@ -38,6 +45,11 @@ hits_scorer_delete(HitsScorer *hs);
 void
 hits_scorer_setup(HitsScorer *hs, Scorer *scorer);
 
+void
+hits_scorer_set_persist(HitsScorer *hs, int value);
+
+void
+hits_scorer_set_use_content_scores(HitsScorer *hs, int value);
 /// @}
 
 #endif // __HITS_SCORER_H__

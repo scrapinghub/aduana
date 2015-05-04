@@ -78,6 +78,14 @@ error_clean(Error *error);
 void
 error_add(Error* error, const char *msg);
 
+/** Return error messagage if error, otherwise NULL */
+char *
+error_message(const Error *error);
+
+/** Return error code */
+int
+error_code(const Error *error);
+
 /// @}
 
 /** Returns a newly allocated string made by concatenating two strings

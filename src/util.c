@@ -85,6 +85,16 @@ error_add(Error* error, const char *message) {
      }
 }
 
+int
+error_code(const Error* error) {
+     return error->code;
+}
+
+char *
+error_message(const Error *error) {
+     return error_code(error)? error->message: 0;
+}
+
 char *
 concat(const char *s1, const char *s2, char separator) {
      size_t len1 = strlen(s1);

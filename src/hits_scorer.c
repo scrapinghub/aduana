@@ -30,6 +30,9 @@ hits_scorer_new(HitsScorer **hs, PageDB *db) {
           return hits_scorer_error_memory;
      }
 
+     p->persist = HITS_SCORER_PERSIST;
+     p->use_content_scores = HITS_SCORER_USE_CONTENT_SCORES;
+
      p->page_db = db;
      if (hits_new(&p->hits, db->path, 1000) != 0) {
           hits_scorer_set_error(p, hits_scorer_error_internal, __func__);
@@ -55,6 +58,13 @@ hits_scorer_update(void *state) {
           goto on_error;
      }
 
+     if (hs->use_content_scores &&
+         (page_db_get_scores(hs->page_db, &hs->hits->scores) != 0)) {
+          error1 = "retrieving content scores";
+          error2 = hs->page_db->error->message;
+          goto on_error;
+     }
+
      if (hits_compute(hs->hits,
                            st,
                            page_db_link_stream_next,
@@ -63,6 +73,13 @@ hits_scorer_update(void *state) {
           error2 = hs->hits->error->message;
           goto on_error;
      }
+
+     if (mmap_array_delete(hs->hits->scores) != 0) {
+          error1 = "deleting content scores";
+          error2 = hs->hits->scores->error->message;
+          goto on_error;
+     }
+
      page_db_link_stream_delete(st);
      return 0;
 on_error:
@@ -108,6 +125,18 @@ hits_scorer_setup(HitsScorer *hs, Scorer *scorer) {
      scorer->get = hits_scorer_get;
      scorer->update = hits_scorer_update;
 }
+
+void
+hits_scorer_set_persist(HitsScorer *hs, int value) {
+     hs->persist = value;
+     hits_set_persist(hs->hits, value);
+}
+
+void
+hits_scorer_set_use_content_scores(HitsScorer *hs, int value) {
+     hs->use_content_scores = value;
+}
+
 
 #if (defined TEST) && TEST
 #include "CuTest.h"

@@ -598,18 +598,21 @@ bf_scheduler_request(BFScheduler *sch, size_t n_pages, PageRequest **request) {
                se = key.mv_data;
                switch (page_db_get_info(sch->page_db, se->hash, &pi)) {
                case 0:
-                    if (pi->n_crawls == 0)
-                         if (page_request_add_url(req, pi->url) != 0) {
-                              error1 = "adding url to request";
-                              goto on_error;
-                         }
-                    page_info_delete(pi);
+                    if (pi) {
+                         if (pi->n_crawls == 0)
+                              if (page_request_add_url(req, pi->url) != 0) {
+                                   error1 = "adding url to request";
+                                   goto on_error;
+                              }
+                         page_info_delete(pi);
+                    } else {
+                         // TODO
+                    }
                     break;
                default:
                     error1 = "retrieving PageInfo from PageDB";
                     error2 = sch->page_db->error->message;
                     goto on_error;
-                    break;
                }
                break;
 
@@ -867,6 +870,7 @@ test_bf_scheduler_page_rank(CuTest *tc, size_t n_pages) {
               scorer != 0? scorer->error->message: "NULL",
               page_rank_scorer_new(&scorer, db) == 0);
 
+     page_rank_scorer_set_use_content_scores(scorer, 1);
      page_rank_scorer_setup(scorer, sch->scorer);
      bf_scheduler_update_start(sch);
 
@@ -911,6 +915,7 @@ test_bf_scheduler_hits(CuTest *tc, size_t n_pages) {
               scorer != 0? scorer->error->message: "NULL",
               hits_scorer_new(&scorer, db) == 0);
 
+     hits_scorer_set_use_content_scores(scorer, 1);
      hits_scorer_setup(scorer, sch->scorer);
      bf_scheduler_update_start(sch);
 

@@ -33,6 +33,9 @@ int main(int argc, char **argv) {
      case test_memcheck:
           printf("Running memcheck tests\n");
           break;
+     case test_large:
+          printf("Running large tests\n");
+          break;
      default:
           fprintf(stderr, "Unknown test specification\n");
           goto on_error;

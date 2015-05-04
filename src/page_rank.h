@@ -65,6 +65,9 @@ page_rank_compute(PageRank *pr,
 PageRankError
 page_rank_get(const PageRank *pr, size_t idx, float *score_old, float *score_new);
 
+void
+page_rank_set_persist(PageRank *pr, int value);
+
 /// @}
 
 #endif // _PAGE_RANK_H
