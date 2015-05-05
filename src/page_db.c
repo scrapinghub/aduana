@@ -6,6 +6,7 @@
 #include <limits.h>
 #include <malloc.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -155,6 +156,9 @@ crawled_page_get_link(const CrawledPage *cp, size_t i) {
 /// @{
 int
 page_info_print(const PageInfo *pi, char *out) {
+#ifdef _WIN32
+#define snprintf _snprintf
+#endif
      size_t i = 0;
 
      time_t first_crawl = (time_t)pi->first_crawl;

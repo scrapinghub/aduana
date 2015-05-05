@@ -132,6 +132,11 @@ varint_encode_int64(int64_t n, uint8_t *out);
 int64_t
 varint_decode_int64(uint8_t *in, uint8_t* read);
 
+#ifdef _WIN32
+void
+mkdtemp(char *template);
+#endif
+
 #if (defined TEST) && TEST
 #include "CuTest.h"
 CuSuite *

@@ -10,7 +10,11 @@
 #include <stdint.h>
 #include <string.h>
 
+#ifdef _WIN32
+#include "mman.h"
+#else
 #include <sys/mman.h>
+#endif
 #include <sys/stat.h>
 #include <unistd.h>
 

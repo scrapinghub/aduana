@@ -11,7 +11,11 @@
 #include <string.h>
 #include <time.h>
 
+#ifdef _WIN32
+#include "mman.h"
+#else
 #include <sys/mman.h>
+#endif
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>

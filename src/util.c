@@ -12,6 +12,10 @@
 
 #include "util.h"
 
+#ifdef _WIN32
+#include <direct.h>
+#endif
+
 static void
 error_set_1(Error* error, int code, const char *message) {
      error->code = code;
@@ -116,7 +120,11 @@ build_path(const char *path, const char *fname) {
 
 char *
 make_dir(const char *path) {
+#ifdef _WIN32
+     if (_mkdir(path)) {
+#else
      if (mkdir(path, 0775) != 0) {
+#endif
           if (errno != EEXIST)
                return strerror(errno);
           else {
@@ -167,6 +175,13 @@ varint_decode_int64(uint8_t *in, uint8_t* read) {
           return -((res - 1)/2);
 }
 
+#ifdef _WIN32
+#include <io.h>
+void
+mkdtemp(char *template) {
+     _mktemp_s(template, strlen(template) + 1);
+}
+#endif
 
 #if (defined TEST) && TEST
 #include "CuTest.h"

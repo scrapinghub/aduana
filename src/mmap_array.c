@@ -9,7 +9,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef _WIN32
+#include "mman.h"
+#else
 #include <sys/mman.h>
+#endif
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -211,14 +215,27 @@ mmap_array_resize(MMapArray *marr, size_t n_elements) {
           error = "resizing file";
           goto on_error;
      }
+#ifdef _WIN32
+     if (munmap(marr->mem, 0) != 0)
+          marr->mem = MAP_FAILED;
+     else
+          marr->mem = mmap(
+               0,
+               new_size,
+               PROT_READ | PROT_WRITE,
+               marr->fd == -1? MAP_PRIVATE | MAP_ANONYMOUS: MAP_SHARED,
+               marr->fd,
+               0);
+#else
      marr->mem = mremap(marr->mem, old_size, new_size, MREMAP_MAYMOVE);
+#endif
+
      if (marr->mem == MAP_FAILED) {
           error_code = mmap_array_error_mmap;
           errno_cp = errno;
           error = "resizing mmap";
           goto on_error;
      }
-
      marr->n_elements = n_elements;
      return 0;
 

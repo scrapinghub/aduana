@@ -7,50 +7,50 @@
 
 #include "lz4_link_stream.h"
 #include "page_rank.h"
+#include "util.h"
 
-int 
+int
 main(int argc, char **argv) {
      if (argc != 2) {
-	  printf("Usage: page_rank path_to_lz4_links\n");
-	  return -1;
+          printf("Usage: page_rank path_to_lz4_links\n");
+          return -1;
      }
 
-     char test_dir[] = "test-page-rank-XXXXXX";
+     char test_dir[] = "test-hits-XXXXXX";
      mkdtemp(test_dir);
-     char data[] = "test-page-rank-XXXXXX/data.mdb";
-     char lock[] = "test-page-rank-XXXXXX/lock.mdb";
-     for (size_t i=0; test_dir[i] != 0; i++)
-	  data[i] = lock[i] = test_dir[i];
+
+     char *data = build_path(test_dir, "data.mdb");
+     char *lock = build_path(test_dir, "lock.mdb");
 
      PageRank *pr;
      if (page_rank_new(&pr, test_dir, 1000000) != 0)
-	  return -1;
+          return -1;
 
      printf("Initialized PageRank\n");
 
      LZ4LinkStream *link_stream;
      if (lz4_link_stream_new(&link_stream, argv[1]) != 0)
-	  return -1;
+          return -1;
 
      clock_t t = clock();
      pr->max_loops = 30;
      pr->precision = 1e-6;
      switch (page_rank_compute(pr, link_stream, lz4_link_stream_next, lz4_link_stream_reset)) {
      case 0:
-	  printf("PageRank finished to desired precision\n");
+          printf("PageRank finished to desired precision\n");
           break;
      case page_rank_error_precision:
-	  printf("PageRank finished after hitting max loops\n");
-	  break;
+          printf("PageRank finished after hitting max loops\n");
+          break;
      default:
-	  return -1;
+          return -1;
      }
      t = clock() - t;
      printf("PageRank total time: %.2f\n", ((float)t)/CLOCKS_PER_SEC);
-     
-#ifdef PRINT_RESULTS // Print results 
+
+#ifdef PRINT_RESULTS // Print results
      for (size_t i=0; i<pr->n_pages; ++i) {
-	  printf("% 12zu PR: %.3e\n", i, *(float*)mmap_array_idx(pr->value1, i));
+          printf("% 12zu PR: %.3e\n", i, *(float*)mmap_array_idx(pr->value1, i));
      }
 #endif
 

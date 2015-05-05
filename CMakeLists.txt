@@ -30,6 +30,12 @@ include_directories(
   lib/lmdb
 )
 
+if(WIN32)
+    add_library(mman SHARED
+        lib/mman.c
+    )
+endif(WIN32)
+
 # Common code
 ############################################################
 add_library(pagedb SHARED
@@ -47,6 +53,9 @@ add_library(pagedb SHARED
 include_directories(src)
 target_link_libraries(pagedb lmdb xxhash smaz)
 target_link_libraries(pagedb pthread)
+if(WIN32)
+    target_link_libraries(pagedb mman)
+endif(WIN32)
 
 # Benchmarks
 #############################################################
