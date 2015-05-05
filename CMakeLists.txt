@@ -11,34 +11,30 @@ set(CMAKE_C_FLAGS_RELEASE  "${CMAKE_C_FLAGS_RELEASE} -O3")
 
 # External libraries
 ############################################################
-add_library(xxhash SHARED
-  lib/xxhash.c
-)
-add_library(smaz SHARED
-  lib/smaz.c
-)
-include_directories(
-  lib
-)
+add_library(xxhash OBJECT lib/xxhash.c)
+set_property(TARGET xxhash PROPERTY POSITION_INDEPENDENT_CODE 1)
+
+add_library(smaz OBJECT lib/smaz.c)
+set_property(TARGET smaz PROPERTY POSITION_INDEPENDENT_CODE 1)
+
+include_directories(lib)
 
 add_definitions(-DMDB_MAXKEYSIZE=500)
-add_library(lmdb SHARED
+add_library(lmdb OBJECT
   lib/lmdb/mdb.c
   lib/lmdb/midl.c
 )
-include_directories(
-  lib/lmdb
-)
+include_directories(lib/lmdb)
+set_property(TARGET lmdb PROPERTY POSITION_INDEPENDENT_CODE 1)
 
 if(WIN32)
-    add_library(mman SHARED
-        lib/mman.c
-    )
+    add_library(mman OBJECT lib/mman.c)
+    set_property(TARGET mman PROPERTY POSITION_INDEPENDENT_CODE 1)
 endif(WIN32)
 
-# Common code
+# Main library
 ############################################################
-add_library(pagedb SHARED
+set(PAGE_DB_SRC
   src/mmap_array.c
   src/page_db.c
   src/hits.c
@@ -49,13 +45,18 @@ add_library(pagedb SHARED
   src/page_rank_scorer.c
   src/hits_scorer.c
   src/txn_manager.c
+
+  $<TARGET_OBJECTS:lmdb>
+  $<TARGET_OBJECTS:xxhash>
+  $<TARGET_OBJECTS:smaz>
 )
-include_directories(src)
-target_link_libraries(pagedb lmdb xxhash smaz)
-target_link_libraries(pagedb pthread)
 if(WIN32)
-    target_link_libraries(pagedb mman)
+    set(PAGE_DB_SRC ${PAGE_DB_SRC} $<TARGET_OBJECTS:mman>)
 endif(WIN32)
+add_library(pagedb SHARED ${PAGE_DB_SRC})
+include_directories(src)
+target_link_libraries(pagedb pthread)
+
 
 # Benchmarks
 #############################################################
@@ -74,10 +75,7 @@ add_library(lz4 STATIC
   test/benchmark/lz4/lz4hc.c
 )
 
-include_directories(
-  test/benchmark/lz4
-)
-target_link_libraries(lz4 xxhash)
+include_directories(test/benchmark/lz4)
 
 add_library(lz4_link_stream STATIC
   test/benchmark/lz4_link_stream.c
@@ -93,15 +91,13 @@ add_executable(hits test/benchmark/hits.c)
 target_link_libraries(lz4_link_stream lz4)
 target_link_libraries(page_rank pagedb lz4_link_stream)
 target_link_libraries(hits pagedb lz4_link_stream)
-target_link_libraries(urldb hat-trie lmdb xxhash)
+target_link_libraries(urldb hat-trie pagedb)
 
 # Tests
 #############################################################
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
   add_definitions(-DTEST)
-  add_library(CuTest SHARED
-    test/CuTest.c
-  )
+  add_library(CuTest SHARED test/CuTest.c)
   include_directories(test)
   target_link_libraries(pagedb CuTest)    
   add_executable(test test/test.c)
