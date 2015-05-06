@@ -53,6 +53,18 @@ set(PAGE_DB_SRC
 if(WIN32)
     set(PAGE_DB_SRC ${PAGE_DB_SRC} $<TARGET_OBJECTS:mman>)
 endif(WIN32)
+
+# Tests
+#############################################################
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+  add_definitions(-DTEST)
+  include_directories(test)
+  set(PAGE_DB_SRC ${PAGE_DB_SRC} test/CuTest.c)
+  add_executable(test test/test.c)
+  target_link_libraries(test pagedb)
+endif()
+
+
 add_library(pagedb SHARED ${PAGE_DB_SRC})
 include_directories(src)
 target_link_libraries(pagedb pthread)
@@ -93,16 +105,6 @@ target_link_libraries(page_rank pagedb lz4_link_stream)
 target_link_libraries(hits pagedb lz4_link_stream)
 target_link_libraries(urldb hat-trie pagedb)
 
-# Tests
-#############################################################
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-  add_definitions(-DTEST)
-  add_library(CuTest SHARED test/CuTest.c)
-  include_directories(test)
-  target_link_libraries(pagedb CuTest)    
-  add_executable(test test/test.c)
-  target_link_libraries(test pagedb)
-endif()
 
 # Installation
 #############################################################
