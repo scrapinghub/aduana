@@ -60,7 +60,7 @@ static int
 page_links_add_link(PageLinks *pl, const char *url, float score) {
      // Each time we hit the limit we double reserved space
      if (pl->n_links == pl->m_links) {
-          void *p = realloc(pl->link_info, 2*pl->m_links);
+          void *p = realloc(pl->link_info, 2*pl->m_links*sizeof(LinkInfo));
           if (!p)
                return -1;
           pl->link_info = p;
