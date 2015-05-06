@@ -7,5 +7,5 @@ setup(name='PageDB',
       description='Bindings for PageDB library',
       author='Pedro Lopez-Adeva Fernandez-Layos',
       author_email='pedro@scrapinghub.com',
-      py_modules=['pagedb'],
+      py_modules=['pagedb', 'pdb_frontera'],
      )
