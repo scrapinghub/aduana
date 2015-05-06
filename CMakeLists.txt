@@ -103,3 +103,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
   add_executable(test test/test.c)
   target_link_libraries(test pagedb)
 endif()
+
+# Installation
+#############################################################
+install(TARGETS pagedb DESTINATION lib)

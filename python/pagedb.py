@@ -1,6 +1,6 @@
 import ctypes as ct
 
-C_PAGE_DB = ct.cdll.LoadLibrary('../debug/libpagedb.so')
+C_PAGE_DB = ct.cdll.LoadLibrary('libpagedb.so')
 
 class PageDBException(Exception):
     @classmethod
@@ -263,12 +263,12 @@ C_PAGE_DB.bf_scheduler_set_persist.restype = None
 class BFScheduler(object):
     def __init__(self, path, persist=0, scorer_class=None):
         # save to make sure lib is available at destruction time
-        self._c = C_PAGE_DB
+        self._c_page_db = C_PAGE_DB
 
         self._page_db = PageDB(path, persist)
         self._pBF = ct.POINTER(c_BFScheduler)()
 
-        ret = self._c.bf_scheduler_new(
+        ret = self._c_page_db.bf_scheduler_new(
             ct.byref(self._pBF), self._page_db._page_db)
         if ret != 0:
             if self._pBF:
@@ -276,34 +276,38 @@ class BFScheduler(object):
             else:
                 raise PageDBException("Error inside bf_scheduler_new", ret)
 
-        self._c.bf_scheduler_set_persist(self._pBF, persist)
+        self._c_page_db.bf_scheduler_set_persist(self._pBF, persist)
 
         if scorer_class:
             self._scorer = scorer_class(self._page_db)
             self._scorer.setup(self._pBF.contents.scorer)
-            ret = self._c.bf_scheduler_update_start(self._pBF)
+            ret = self._c_page_db.bf_scheduler_update_start(self._pBF)
             if ret != 0:
                 raise PageDBException.from_error(self._pBF.contents.error)
 
 
     def __del__(self):
-        ret = self._c.bf_scheduler_update_stop(self._pBF)
+        ret = self._c_page_db.bf_scheduler_update_stop(self._pBF)
         if ret != 0:
             raise PageDBException.from_error(self._pBF.contents.error)
-        self._c.bf_scheduler_delete(self._pBF)
+        self._c_page_db.bf_scheduler_delete(self._pBF)
 
     def add(self, crawled_page):
-        ret = self._c.bf_scheduler_add(self._pBF, crawled_page._crawled_page)
+        # better to signal this as an error here than in bf_scheduler_add
+        if not isinstance(crawled_page, CrawledPage):
+            raise PageDBException("argument to function must be a CrawledPage instance")
+
+        ret = self._c_page_db.bf_scheduler_add(self._pBF, crawled_page._crawled_page)
         if ret != 0:
             raise PageDBException.from_error(self._pBF.contents.error)
 
     def requests(self, n_pages):
         pReq = ct.POINTER(c_PageRequest)()
-        ret = self._c.bf_scheduler_request(self._pBF, n_pages, ct.byref(pReq))
+        ret = self._c_page_db.bf_scheduler_request(self._pBF, n_pages, ct.byref(pReq))
         if ret != 0:
             raise PageDBException.from_error(self._pBF.contents.error)
         reqs = [pReq.contents.urls[i] for i in xrange(pReq.contents.n_urls)]
-        self._c.page_request_delete(pReq)
+        self._c_page_db.page_request_delete(pReq)
         return reqs
 
 
