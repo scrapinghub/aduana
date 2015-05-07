@@ -8,8 +8,19 @@
 #include "scorer.h"
 #include "txn_manager.h"
 
-/// @addtogroup BFScheduler
-/// @{
+/** @addtogroup BFScheduler
+ *
+ * BestFirst scheduler. As it name implies this scheduler follows a greedy
+ * strategy to decide which page is going to crawl next. It mains an ordered
+ * list of uncrawled pages. To decide the next page to be crawled this scheduler
+ * picks the highest score page and removes it from the top of the list.
+ *
+ * The key is then to assign valid scores to the pages. If no scorer is selected
+ * this scheduler will use the score provided when the page is crawled. Additionally
+ * an alternative scorer can be set up, see for example @ref page_rank_scorer_setup
+ * or @ref hits_scorer_setup.
+ * @{
+ */
 
 /** Size of the mmap to store the schedule */
 #define BF_SCHEDULER_DEFAULT_SIZE PAGE_DB_DEFAULT_SIZE
@@ -153,7 +164,11 @@ bf_scheduler_request(BFScheduler *sch, size_t n_pages, PageRequest **request);
 void
 bf_scheduler_delete(BFScheduler *sch);
 
-/** Start the update thread */
+/** Start the update thread.
+ *
+ * The update thread will run periodically the scorer, in case there is one,
+ * to recompute page scores.
+ **/
 BFSchedulerError
 bf_scheduler_update_start(BFScheduler *sch);
 

@@ -94,7 +94,7 @@ error_code(const Error* error) {
      return error->code;
 }
 
-char *
+const char *
 error_message(const Error *error) {
      return error_code(error)? error->message: 0;
 }
