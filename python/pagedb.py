@@ -2,11 +2,17 @@ import ctypes as ct
 
 C_PAGE_DB = ct.cdll.LoadLibrary('libpagedb.so')
 
+C_PAGE_DB.error_message.argtypes = [ct.c_void_p]
+C_PAGE_DB.error_message.restype = ct.c_char_p
+C_PAGE_DB.error_code.argtypes = [ct.c_void_p]
+C_PAGE_DB.error_code.restype = ct.c_int
+
 class PageDBException(Exception):
     @classmethod
     def from_error(cls, c_error):
-        return cls(C_PAGE_DB.error_message(c_error),
-                   C_PAGE_DB.error_code(c_error))
+        return cls(
+            message = C_PAGE_DB.error_message(c_error),
+            code = C_PAGE_DB.error_code(c_error))
 
     def __init__(self, message, code=None):
         self.message = message
