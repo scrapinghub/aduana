@@ -74,7 +74,8 @@ hits_scorer_update(void *state) {
           goto on_error;
      }
 
-     if (mmap_array_delete(hs->hits->scores) != 0) {
+     if (hs->use_content_scores &&
+         (mmap_array_delete(hs->hits->scores) != 0)) {
           error1 = "deleting content scores";
           error2 = hs->hits->scores->error->message;
           goto on_error;
