@@ -155,13 +155,16 @@ class c_PageDB(ct.Structure):
 
 C_PAGE_DB.page_db_hash.argtypes = [ct.c_char_p]
 C_PAGE_DB.page_db_hash.restype = ct.c_uint64
+
 C_PAGE_DB.page_db_new.argtypes = [
     ct.POINTER(ct.POINTER(c_PageDB)),
     ct.c_char_p
 ]
 C_PAGE_DB.page_db_new.restype = ct.c_int
+
 C_PAGE_DB.page_db_delete.argtypes = [ct.POINTER(c_PageDB)]
 C_PAGE_DB.page_db_delete.restype = ct.c_int
+
 C_PAGE_DB.page_db_set_persist.argtypes = [ct.POINTER(c_PageDB), ct.c_int]
 C_PAGE_DB.page_db_set_persist.restype = None
 
@@ -195,28 +198,122 @@ class PageDB(object):
     def __del__(self):
         self._c_page_db.page_db_delete(self._page_db)
 
-c_pPageRankScorer = ct.c_void_p
+
+########################################################################
+# Scorers
+########################################################################
+class c_PageRankScorer(ct.Structure):
+    _fields_ = [
+        ("page_rank", ct.c_void_p),
+        ("page_db", ct.c_void_p),
+        ("error", ct.c_void_p),
+        ("persist", ct.c_int),
+        ("use_content_scores", ct.c_int)
+    ]
+
 C_PAGE_DB.page_rank_scorer_new.argtypes = [
-    ct.POINTER(c_pPageRankScorer), ct.POINTER(c_PageDB)]
+    ct.POINTER(ct.POINTER(c_PageRankScorer)), ct.POINTER(c_PageDB)]
 C_PAGE_DB.page_rank_scorer_new.restype = ct.c_int
-C_PAGE_DB.page_rank_scorer_delete.argtypes = [c_pPageRankScorer]
+
+C_PAGE_DB.page_rank_scorer_delete.argtypes = [ct.POINTER(c_PageRankScorer)]
 C_PAGE_DB.page_rank_scorer_delete.restype = ct.c_int
-C_PAGE_DB.page_rank_scorer_setup.argtypes = [c_pPageRankScorer, ct.c_void_p]
+
+C_PAGE_DB.page_rank_scorer_setup.argtypes = [ct.POINTER(c_PageRankScorer), ct.c_void_p]
 C_PAGE_DB.page_rank_scorer_setup.restype = None
+
+C_PAGE_DB.page_rank_scorer_set_persist.argtypes = [ct.POINTER(c_PageRankScorer), ct.c_int]
+C_PAGE_DB.page_rank_scorer_set_persist.restype = None
+
+C_PAGE_DB.page_rank_scorer_set_use_content_scores.argtypes = [ct.POINTER(c_PageRankScorer), ct.c_int]
+C_PAGE_DB.page_rank_scorer_set_use_content_scores.restype = None
 
 class PageRankScorer(object):
     def __init__(self, page_db):
-        self._c = C_PAGE_DB
+        self._c_page_db = C_PAGE_DB
 
-        self._pRS = c_pPageRankScorer()
-        self._c.page_rank_scorer_new(ct.byref(self._pRS), page_db._page_db)
+        self._scorer = ct.POINTER(c_PageRankScorer)()
+        self._c_page_db.page_rank_scorer_new(ct.byref(self._scorer), page_db._page_db)
 
     def __del__(self):
-        self._c.page_rank_scorer_delete(self._pRS)
+        self._c_page_db.page_rank_scorer_delete(self._scorer)
 
     def setup(self, scorer):
-        self._c.page_rank_scorer_setup(self._pRS, scorer)
+        self._c_page_db.page_rank_scorer_setup(self._scorer, scorer)
 
+    @property
+    def persist(self):
+        return self._scorer.contents.persist
+
+    @persist.setter
+    def persist(self, value):
+        self._c_page_db.page_rank_scorer_set_persist(self._scorer, value)
+
+    @property
+    def use_content_scores(self):
+        return self._scorer.contents.use_content_scores
+
+    @use_content_scores.setter
+    def use_content_scores(self, value):
+        self._c_page_db.page_rank_scorer_set_use_content_scores(self._scorer, value)
+
+
+class c_HitsScorer(ct.Structure):
+    _fields_ = [
+        ("hits", ct.c_void_p),
+        ("page_db", ct.c_void_p),
+        ("error", ct.c_void_p),
+        ("persist", ct.c_int),
+        ("use_content_scores", ct.c_int)
+    ]
+
+C_PAGE_DB.hits_scorer_new.argtypes = [
+    ct.POINTER(ct.POINTER(c_HitsScorer)), ct.POINTER(c_PageDB)]
+C_PAGE_DB.hits_scorer_new.restype = ct.c_int
+
+C_PAGE_DB.hits_scorer_delete.argtypes = [ct.POINTER(c_HitsScorer)]
+C_PAGE_DB.hits_scorer_delete.restype = ct.c_int
+
+C_PAGE_DB.hits_scorer_setup.argtypes = [ct.POINTER(c_HitsScorer), ct.c_void_p]
+C_PAGE_DB.hits_scorer_setup.restype = None
+
+C_PAGE_DB.hits_scorer_set_persist.argtypes = [ct.POINTER(c_HitsScorer), ct.c_int]
+C_PAGE_DB.hits_scorer_set_persist.restype = None
+
+C_PAGE_DB.hits_scorer_set_use_content_scores.argtypes = [ct.POINTER(c_HitsScorer), ct.c_int]
+C_PAGE_DB.hits_scorer_set_use_content_scores.restype = None
+
+class HitsScorer(object):
+    def __init__(self, page_db):
+        self._c_page_db = C_PAGE_DB
+
+        self._scorer = ct.POINTER(c_HitsScorer)()
+        self._c_page_db.hits_scorer_new(ct.byref(self._scorer), page_db._page_db)
+
+    def __del__(self):
+        self._c_page_db.hits_scorer_delete(self._scorer)
+
+    def setup(self, scorer):
+        self._c_page_db.hits_scorer_setup(self._scorer, scorer)
+
+    @property
+    def persist(self):
+        return self._scorer.contents.persist
+
+    @persist.setter
+    def persist(self, value):
+        self._c_page_db.hits_scorer_set_persist(self._scorer, value)
+
+    @property
+    def use_content_scores(self):
+        return self._scorer.contents.use_content_scores
+
+    @use_content_scores.setter
+    def use_content_scores(self, value):
+        self._c_page_db.hits_scorer_set_use_content_scores(self._scorer, value)
+
+########################################################################
+# Scheduler Wrappers
+########################################################################
 class c_PageRequest(ct.Structure):
     _fields_ = [
         ("urls", ct.POINTER(ct.c_char_p)),
@@ -232,9 +329,6 @@ C_PAGE_DB.page_request_delete.restype = None
 C_PAGE_DB.page_request_add_url.argtypes = [ct.POINTER(c_PageRequest), ct.c_char_p]
 C_PAGE_DB.page_request_delete.restype = ct.c_int
 
-########################################################################
-# BFScheduler Wrappers
-########################################################################
 class c_BFScheduler(ct.Structure):
     _fields_ = [
         ("page_db", ct.POINTER(c_PageDB)),
@@ -248,30 +342,38 @@ class c_BFScheduler(ct.Structure):
 C_PAGE_DB.bf_scheduler_new.argtypes = [
     ct.POINTER(ct.POINTER(c_BFScheduler)), ct.POINTER(c_PageDB)]
 C_PAGE_DB.bf_scheduler_new.restype = ct.c_int
+
 C_PAGE_DB.bf_scheduler_add.argtypes = [
     ct.POINTER(c_BFScheduler), ct.POINTER(c_CrawledPage)]
 C_PAGE_DB.bf_scheduler_add.restype = ct.c_int
+
 C_PAGE_DB.bf_scheduler_request.argtypes = [
     ct.POINTER(c_BFScheduler),
     ct.c_size_t,
     ct.POINTER(ct.POINTER(c_PageRequest))
 ]
 C_PAGE_DB.bf_scheduler_request.restype = ct.c_int
+
 C_PAGE_DB.bf_scheduler_delete.argtypes = [ct.POINTER(c_BFScheduler)]
 C_PAGE_DB.bf_scheduler_delete.restype = None
+
 C_PAGE_DB.bf_scheduler_update_start.argtypes = [ct.POINTER(c_BFScheduler)]
 C_PAGE_DB.bf_scheduler_update_start.restype = ct.c_int
+
 C_PAGE_DB.bf_scheduler_update_stop.argtypes = [ct.POINTER(c_BFScheduler)]
 C_PAGE_DB.bf_scheduler_update_stop.restype = ct.c_int
+
 C_PAGE_DB.bf_scheduler_set_persist.argtypes = [ct.POINTER(c_BFScheduler), ct.c_int]
 C_PAGE_DB.bf_scheduler_set_persist.restype = None
 
 class BFScheduler(object):
-    def __init__(self, path, persist=0, scorer_class=None):
+    def __init__(self, page_db, persist=0, scorer=None):
         # save to make sure lib is available at destruction time
         self._c_page_db = C_PAGE_DB
 
-        self._page_db = PageDB(path, persist)
+        self._page_db = page_db
+        self._page_db.persist = persist
+
         self._pBF = ct.POINTER(c_BFScheduler)()
 
         ret = self._c_page_db.bf_scheduler_new(
@@ -284,13 +386,12 @@ class BFScheduler(object):
 
         self._c_page_db.bf_scheduler_set_persist(self._pBF, persist)
 
-        if scorer_class:
-            self._scorer = scorer_class(self._page_db)
+        if scorer:
+            self._scorer = scorer
             self._scorer.setup(self._pBF.contents.scorer)
             ret = self._c_page_db.bf_scheduler_update_start(self._pBF)
             if ret != 0:
                 raise PageDBException.from_error(self._pBF.contents.error)
-
 
     def __del__(self):
         ret = self._c_page_db.bf_scheduler_update_stop(self._pBF)
@@ -318,7 +419,9 @@ class BFScheduler(object):
 
 
 if __name__ == '__main__':
-    bf = BFScheduler("./test_python_bindings", scorer_class=PageRankScorer)
+    db = PageDB('./test_python_bindings')
+    scorer = PageRankScorer(db)
+    bf = BFScheduler(db, scorer=scorer)
     for i in xrange(100000):
         cp = CrawledPage(str(i), [str(i + j) for j in xrange(10)])
         bf.add(cp)
