@@ -1,5 +1,4 @@
 from bs4 import BeautifulSoup
-from nltk.tokenize import word_tokenize
 
 from scrapy.http import Request
 from scrapy.spider import Spider
