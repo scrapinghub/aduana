@@ -4,7 +4,7 @@ import tempfile
 import pagedb
 
 class Backend(frontera.Backend):
-    def __init__(self, db=None, scorer_class=pagedb.PageRankScorer):
+    def __init__(self, db=None, scorer_class=pagedb.HitsScorer, use_scores=False):
         if db:
             db_path = db
             persist = 1
@@ -12,15 +12,22 @@ class Backend(frontera.Backend):
             db_path = tempfile.mkdtemp(prefix='frontera_', dir='./')
             persist = 0
 
+        self._page_db = pagedb.PageDB(db_path)
+        self._scorer = scorer_class(self._page_db)
+        if use_scores:
+            self._scorer.use_content_scores = 1
+
         self._scheduler = pagedb.BFScheduler(
-            db_path, 
-            persist=persist, 
-            scorer_class=scorer_class
+            self._page_db,
+            scorer = self._scorer
         )
 
     @classmethod
     def from_manager(cls, manager):
-        return cls(manager.settings.get('PAGE_DB_PATH', None))
+        return cls(
+            db=manager.settings.get('PAGE_DB_PATH', None),
+            use_scores=manager.settings.get('USE_SCORES', False)
+        )
 
     def frontier_start(self):
         pass
@@ -31,8 +38,8 @@ class Backend(frontera.Backend):
     def add_seeds(self, seeds):
         self._scheduler.add(
             pagedb.CrawledPage(
-                '_start_', 
-                [link.url for link in seeds]
+                '_start_',
+                [(link.url, 1.0) for link in seeds]
             )
         )
 
@@ -40,10 +47,11 @@ class Backend(frontera.Backend):
         pass
 
     def page_crawled(self, response, links):
-        self._scheduler.add(
-            pagedb.CrawledPage(response.url,
-                               [link.url for link in links])
-        )
+        cp = pagedb.CrawledPage(
+            response.url,
+            [(link.url, link.meta['score']) for link in links])
+
+        self._scheduler.add(cp)
 
     def get_next_requests(self, max_n_requests, **kwargs):
         return map(Request, self._scheduler.requests(max_n_requests))
