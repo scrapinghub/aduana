@@ -1,12 +1,26 @@
 # Description
-Prototype application for processing huge graphs and compute PageRank, HITS or other scores
+A proof of concept to demonstrate that is possible to use a single
+computer to direct a crawl using PageRank, HITS or other ranking
+algorithms based on the link structure of the web graph, even when
+making big crawls (one billion pages).
+
+This is a pure C implementation of several algorithms intended to be
+wrapped using python and called from
+[Frontera](https://github.com/scrapinghub/frontera), a crawl frontier
+module for [Scrapy](https://github.com/scrapy/scrapy).
+
+Python bindings and an example spider are provided
+[here](python/example).
 
 # Setup
 
 ## Requirements
 - CMake and C compiler (C99 support)
-- Python with lz4tools package (available on pip)
-- shell and wget
+- Python
+
+For the example spider, the following python modules:
+- scrapy
+- BeautifulSoup4
 
 ## To build debug
 1. mkdir debug && cd debug
@@ -18,17 +32,6 @@ Prototype application for processing huge graphs and compute PageRank, HITS or o
 2. cmake .. -DCMAKE_BUILD_TYPE=Release
 3. make
 
-## Download test data
-1. cd test/data
-2. ./fetch_live_journal
-
 ## Test
-
-### Unit tests
 1. cd debug && make
 2. ./test
-
-### Benchmarks
-1. cd release
-2. ./page_rank ../test/data/live_journal/*.lz4
-3. ./hits ../test/data/live_journal/*.lz4
