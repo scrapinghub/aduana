@@ -65,10 +65,17 @@ hits_scorer_update(void *state) {
           goto on_error;
      }
 
-     if (hits_compute(hs->hits,
-                           st,
-                           page_db_link_stream_next,
-                           page_db_link_stream_reset) != 0) {
+     HitsError herr = hits_compute(hs->hits,
+                                   st,
+                                   page_db_link_stream_next,
+                                   page_db_link_stream_reset);
+
+     // Inside a page scorer we allow some lack of precision
+     // TODO Give some warning?
+     if (herr == hits_error_precision)
+          herr = 0;
+
+     if (herr != 0) {
           error1 = "computing HITS";
           error2 = hs->hits->error->message;
           goto on_error;

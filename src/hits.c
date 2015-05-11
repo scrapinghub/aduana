@@ -222,18 +222,23 @@ hits_loop(Hits *hits,
                     } else {
                          *s2 += *s1;
                     }
-               } else {
+               }
+#if 0 // ignore links out of the known graph
+               else {
                     return hits_error_internal;
                }
+#endif
 
                // auth[i] = sum(hub[j]) for all j such that j->i
                s2 = mmap_array_idx(hits->a2, link.to);
                s1 = mmap_array_idx(hits->h1, link.from);
                if (s1 && s2)
                     *s2 += *s1;
+#if 0 // ignore links out of the known graph
                else
                     return hits_error_internal;
                break;
+#endif
           }
      } while (!end_stream);
 
