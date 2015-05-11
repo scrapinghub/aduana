@@ -1,0 +1,551 @@
+Machine learning
+Data analysis
+Occam's razor
+Curse of dimensionality
+No free lunch theorem
+Accuracy paradox
+Overfitting
+Regularization
+Inductive bias
+Data dredging
+Ugly duckling theorem
+Uncertain data
+Knowledge discovery
+Data mining
+Predictive analytics
+Predictive modelling
+Business intelligence
+Reactive business intelligence
+Business analytics
+Reactive business intelligence
+Pattern recognition
+Abductive reasoning
+Inductive reasoning
+First-order logic
+Inductive logic programming
+Reasoning system
+Case-based reasoning
+Textual case based reasoning
+Causality
+Nearest neighbor search
+Stochastic gradient descent
+Beam search
+Best-first search
+Breadth-first search
+Hill climbing
+Grid search
+Brute-force search
+Depth-first search
+Tabu search
+Anytime algorithm
+Exploratory data analysis
+Covariate
+Statistical inference
+Algorithmic inference
+Bayesian inference
+Base rate
+Bias error
+Gibbs sampling
+Cross-entropy method
+Latent variable
+Maximum likelihood
+Maximum a posteriori estimation
+Expectation–maximization algorithm
+Expectation propagation
+Kullback–Leibler divergence
+Generative model
+Supervised learning
+Unsupervised learning
+Active learning
+Reinforcement learning
+Multi-task learning
+Transduction
+Explanation-based learning
+Offline learning
+Online learning model
+Online machine learning
+Hyperparameter optimization
+Classification in machine learning
+Concept class
+Feature vector
+Feature space
+Concept learning
+Binary classification
+Decision boundary
+Multiclass classification
+Class membership probabilities
+Concept drift
+Prior knowledge for pattern recognition
+Iris flower data set
+Margin Infused Relaxed Algorithm
+Semi-supervised learning
+One-class classification
+Coupled pattern learner
+Lazy learning
+Eager learning
+Instance-based learning
+Cluster assumption
+K-nearest neighbor algorithm
+IDistance
+Large margin nearest neighbor
+Decision tree learning
+Decision stump
+Pruning
+Mutual information
+Adjusted mutual information
+Information gain ratio
+Information gain in decision trees
+ID3 algorithm
+C4.5 algorithm
+CHAID
+Information Fuzzy Networks
+Grafting
+Incremental decision tree
+Alternating decision tree
+Logistic model tree
+Random forest
+Linear classifier
+Margin classifier
+Soft independent modelling of class analogies
+Statistical classification
+Probability matching
+Discriminative model
+Linear discriminant analysis
+Multiclass LDA
+Multiple discriminant analysis
+Optimal discriminant analysis
+Fisher kernel
+Discriminant function analysis
+Multilinear subspace learning
+Quadratic classifier
+Variable kernel density estimation
+Category utility
+Data classification
+Training set
+Test set
+Synthetic data
+Cross-validation
+Loss function
+Hinge loss
+Generalization error
+Type I and type II errors
+Sensitivity and specificity
+Precision and recall
+F1 score
+Confusion matrix
+Matthews correlation coefficient
+Receiver operating characteristic
+Lift
+Stability in learning
+Data Pre-processing
+Discretization of continuous features
+Feature selection
+Feature extraction
+Dimension reduction
+Principal component analysis
+Multilinear principal-component analysis
+Multifactor dimensionality reduction
+Targeted projection pursuit
+Multidimensional scaling
+Nonlinear dimensionality reduction
+Kernel principal component analysis
+Kernel eigenvoice
+Gramian matrix
+Gaussian process
+Kernel adaptive filter
+Isomap
+Manifold alignment
+Diffusion map
+Elastic map
+Locality-sensitive hashing
+Spectral clustering
+Minimum redundancy feature selection
+Cluster analysis
+K-means
+K-means++
+K-medians clustering
+K-medoids
+DBSCAN
+Fuzzy clustering
+BIRCH
+Canopy clustering algorithm
+Cluster-weighted modeling
+Clustering high-dimensional data
+Cobweb
+Complete-linkage clustering
+Constrained clustering
+Correlation clustering
+CURE data clustering algorithm
+Data stream clustering
+Dendrogram
+Determining the number of clusters in a data set
+FLAME clustering
+Hierarchical clustering
+Information bottleneck method
+Lloyd's algorithm
+Nearest-neighbor chain algorithm
+Neighbor joining
+OPTICS algorithm
+Pitman–Yor process
+Single-linkage clustering
+SUBCLU
+Thresholding
+UPGMA
+Rand index
+Dunn index
+Davies–Bouldin index
+Jaccard index
+MinHash
+K q-flats
+Decision rules
+Rule induction
+Classification rule
+CN2 algorithm
+Decision list
+First Order Inductive Learner
+Association rule learning
+Apriori algorithm
+Contrast set learning
+Affinity analysis
+K-optimal pattern discovery
+Ensemble learning
+Ensemble averaging
+Consensus clustering
+AdaBoost
+Boosting
+Bootstrap aggregating
+BrownBoost
+Cascading classifiers
+Co-training
+CoBoosting
+Gaussian process emulator
+Gradient boosting
+LogitBoost
+LPBoost
+Mixture model
+Product of Experts
+Random multinomial logit
+Random subspace method
+Weighted Majority Algorithm
+Randomized weighted majority algorithm
+Graphical model
+State transition network
+Naive Bayes
+Averaged one-dependence estimators
+Bayesian network
+Bayesian additive regression kernels
+Variational message passing
+Markov model
+Maximum-entropy Markov model
+Hidden Markov model
+Baum–Welch algorithm
+Forward–backward algorithm
+Hierarchical hidden Markov model
+Markov logic network
+Markov chain Monte Carlo
+Markov random field
+Conditional random field
+Predictive state representation
+Computational learning theory
+Version space
+Probably approximately correct learning
+Vapnik–Chervonenkis theory
+Shattering
+VC dimension
+Minimum description length
+Bondy's theorem
+Inferential theory of learning
+Rademacher complexity
+Teaching dimension
+Subclass reachability
+Sample exclusion dimension
+Unique negative dimension
+Uniform convergence
+Witness set
+Kernel methods
+Support vector machine
+Structural risk minimization
+Empirical risk minimization
+Kernel trick
+Least squares support vector machine
+Relevance vector machine
+Sequential minimal optimization
+Structured SVM
+Regression analysis
+Dependent and independent variables
+Linear model
+Linear regression
+Least squares
+Linear least squares
+Local regression
+Additive model
+Antecedent variable
+Autocorrelation
+Backfitting algorithm
+Bayesian linear regression
+Bayesian multivariate linear regression
+Binomial regression
+Canonical analysis
+Censored regression model
+Coefficient of determination
+Comparison of general and generalized linear models
+Compressed sensing
+Conditional change model
+Controlling for a variable
+Cross-sectional regression
+Curve fitting
+Deming regression
+Design matrix
+Difference in differences
+Dummy variable
+Errors and residuals in statistics
+Errors-in-variables models
+Explained sum of squares
+Explained variation
+First-hitting-time model
+Fixed effects model
+Fraction of variance unexplained
+Frisch–Waugh–Lovell theorem
+General linear model
+Generalized additive model
+Generalized additive model for location, scale and shape
+Generalized estimating equation
+Generalized least squares
+Generalized linear array model
+Generalized linear mixed model
+Generalized linear model
+Growth curve
+Guess value
+Hat matrix
+Heckman correction
+Heteroscedasticity-consistent standard errors
+Hosmer–Lemeshow test
+Instrumental variable
+Isotonic regression
+Iteratively reweighted least squares
+Kitchen sink regression
+Lack-of-fit sum of squares
+Leverage
+Limited dependent variable
+Linear probability model
+Mallows's Cp
+Mean and predicted response
+Mixed model
+Moving least squares
+Multicollinearity
+Multiple correlation
+Multivariate probit
+Multivariate adaptive regression splines
+Newey–West estimator
+Non-linear least squares
+Nonlinear regression
+Logit
+Multinomial logit
+Logistic regression
+Bio-inspired computing
+Metaheuristic
+Swarm intelligence
+Ant colony optimization
+Artificial immune system
+Firefly algorithm
+Cuckoo search
+Bat algorithm
+Evolvability
+Evolutionary computation
+Evolutionary algorithm
+Genetic algorithm
+Chromosome
+Crossover
+Fitness function
+Evolutionary data mining
+Genetic programming
+Learnable Evolution Model
+Stochastic diffusion search
+Neural network
+Artificial neural network
+Artificial neuron
+Perceptron
+Multilayer perceptron
+Activation function
+Self-organizing map
+Attractor network
+ADALINE
+Adaptive Neuro Fuzzy Inference System
+Adaptive resonance theory
+IPO underpricing algorithm
+ALOPEX
+Artificial Intelligence System
+Autoassociative memory
+Autoencoder
+Backpropagation
+Bcpnn
+Bidirectional associative memory
+Biological neural network
+Boltzmann machine
+Restricted Boltzmann machine
+Cellular neural network
+Cerebellar Model Articulation Controller
+Committee machine
+Competitive learning
+Compositional pattern-producing network
+Computational cybernetics
+Computational neurogenetic modeling
+Confabulation
+Cortical column
+Counterpropagation network
+Cover's theorem
+Cultured neuronal network
+Dehaene-Changeux Model
+Delta rule
+Early stopping
+Echo state network
+The Emotion Machine
+Evolutionary Acquisition of Neural Topologies
+Extension neural network
+Feed-forward
+Feedforward neural network
+Generalized Hebbian Algorithm
+Generative topographic map
+Group method of data handling
+Growing self-organizing map
+Memory-prediction framework
+Helmholtz machine
+Hierarchical temporal memory
+Hopfield network
+Hybrid neural network
+HyperNEAT
+Infomax
+Instantaneously trained neural networks
+Interactive Activation and Competition
+Leabra
+Learning Vector Quantization
+Lernmatrix
+Linde–Buzo–Gray algorithm
+Liquid state machine
+Long short term memory
+Madaline
+Modular neural networks
+MoneyBee
+Neocognitron
+Nervous system network models
+NETtalk
+Neural backpropagation
+Neural coding
+Neural cryptography
+Neural decoding
+Neural gas
+Neural Information Processing Systems
+Neural modeling fields
+Neural oscillation
+Neurally controlled animat
+Neuroevolution of augmenting topologies
+Neuroplasticity
+Ni1000
+Nonspiking neurons
+Nonsynaptic plasticity
+Oja's rule
+Optical neural network
+Phase-of-firing code
+Promoter based genetic algorithm
+Pulse-coupled networks
+Quantum neural network
+Radial basis function
+Radial basis function network
+Random neural network
+Recurrent neural network
+Reentry
+Reservoir computing
+Rprop
+Semantic neural network
+Sigmoid function
+SNARC
+Softmax activation function
+Spiking neural network
+Stochastic neural network
+Synaptic plasticity
+Synaptic weight
+Tensor product network
+Time delay neural network
+U-Matrix
+Universal approximation theorem
+Winner-take-all
+Winnow
+Reinforcement learning
+Markov decision process
+Bellman equation
+Q-learning
+Temporal difference learning
+SARSA
+Multi-armed bandit
+Apprenticeship learning
+Predictive learning
+Text mining
+Natural language processing
+Document classification
+Bag of words model
+N-gram
+Part-of-speech tagging
+Sentiment analysis
+Information extraction
+Topic model
+Concept mining
+Semantic analysis
+Automatic summarization
+Automatic distillation of structure
+String kernel
+Biomedical text mining
+Never-Ending Language Learning
+Structure mining
+Structured learning
+Structured prediction
+Sequence mining
+Sequence labeling
+Process mining
+Multi-label classification
+Classifier chains
+Web mining
+Anomaly detection
+Anomaly Detection at Multiple Scales
+Local outlier factor
+Novelty detection
+GSP Algorithm
+Optimal matching
+Record linkage
+Meta learning
+Learning automata
+Learning to rank
+Multiple-instance learning
+Statistical relational learning
+Relational classification
+Data stream mining
+Alpha algorithm
+Syntactic pattern recognition
+Multispectral pattern recognition
+Algorithmic learning theory
+Deep learning
+Bongard problem
+Learning with errors
+Parity learning
+Inductive transfer
+Granular computing
+Conceptual clustering
+Formal concept analysis
+Biclustering
+Information visualization
+Co-occurrence networks
+Problem domain
+Recommender system
+Collaborative filtering
+Speech recognition
+Stock forecast
+Activity recognition
+Data Analysis Techniques for Fraud Detection
+Molecule mining
+Predictive behavioral targeting
+Proactive Discovery of Insider Threats Using Graph Analysis and Learning
+Robot learning
+Computer vision
+Facial recognition system
+Outlier detection
+Anomaly detection
+Novelty detection
