@@ -1,5 +1,4 @@
 #include "CuTest.h"
-#include "test.h"
 
 void
 test_bf_scheduler_requests(CuTest *tc) {
@@ -7,15 +6,17 @@ test_bf_scheduler_requests(CuTest *tc) {
      mkdtemp(test_dir_db);
 
      PageDB *db;
+     int ret = page_db_new(&db, test_dir_db);
      CuAssert(tc,
               db!=0? db->error->message: "NULL",
-              page_db_new(&db, test_dir_db) == 0);
+              ret == 0);
      db->persist = 0;
 
      BFScheduler *sch;
+     ret = bf_scheduler_new(&sch, db);
      CuAssert(tc,
               sch != 0? sch->error->message: "NULL",
-              bf_scheduler_new(&sch, db) == 0);
+              ret == 0);
      sch->persist = 0;
 
      /* Make the link structure
@@ -133,8 +134,8 @@ test_bf_scheduler_crawl(CuTest *tc,
           if (i % 10000 == 0) {
                double delta = difftime(time(0), start);
                if (delta > 0) {
-                    printf("%10zuK/%zuM: %9zu pages/sec\n",
-                           i/1000, n_pages/1000000, i/((size_t)delta));
+                    printf("%10zuK/%zuK: %9zu pages/sec\n",
+                           i/1000, n_pages/1000, i/((size_t)delta));
                }
           }
 #endif
@@ -165,34 +166,39 @@ test_bf_scheduler_crawl(CuTest *tc,
           free(links[j].url);
 }
 
+static size_t test_n_pages = 50000;
+
 /* Tests the typical database operations on a moderate crawl of 10M pages */
 static void
-test_bf_scheduler_page_rank(CuTest *tc, size_t n_pages) {
+test_bf_scheduler_page_rank(CuTest *tc) {
      char test_dir_db[] = "test-bfs-XXXXXX";
      mkdtemp(test_dir_db);
 
      PageDB *db;
+     int ret = page_db_new(&db, test_dir_db);
      CuAssert(tc,
               db!=0? db->error->message: "NULL",
-              page_db_new(&db, test_dir_db) == 0);
+              ret == 0);
      db->persist = 0;
 
      BFScheduler *sch;
+     ret = bf_scheduler_new(&sch, db);
      CuAssert(tc,
               sch != 0? sch->error->message: "NULL",
-              bf_scheduler_new(&sch, db) == 0);
+              ret == 0);
      sch->persist = 0;
 
      PageRankScorer *scorer;
+     ret = page_rank_scorer_new(&scorer, db);
      CuAssert(tc,
               scorer != 0? scorer->error->message: "NULL",
-              page_rank_scorer_new(&scorer, db) == 0);
+              ret == 0);
 
      page_rank_scorer_set_use_content_scores(scorer, 1);
      page_rank_scorer_setup(scorer, sch->scorer);
      bf_scheduler_update_start(sch);
 
-     test_bf_scheduler_crawl(tc, sch, n_pages);
+     test_bf_scheduler_crawl(tc, sch, test_n_pages);
 
      bf_scheduler_update_stop(sch);
      bf_scheduler_delete(sch);
@@ -200,44 +206,37 @@ test_bf_scheduler_page_rank(CuTest *tc, size_t n_pages) {
      page_db_delete(db);
 }
 
-void
-test_bf_scheduler_large_page_rank(CuTest *tc) {
-     test_bf_scheduler_page_rank(tc, 10000000);
-}
-
-void
-test_bf_scheduler_very_large_page_rank(CuTest *tc) {
-     test_bf_scheduler_page_rank(tc, 100000000);
-}
-
 /* Tests the typical database operations on a moderate crawl of 10M pages */
 static void
-test_bf_scheduler_hits(CuTest *tc, size_t n_pages) {
+test_bf_scheduler_hits(CuTest *tc) {
      char test_dir_db[] = "test-bfs-XXXXXX";
      mkdtemp(test_dir_db);
 
      PageDB *db;
+     int ret = page_db_new(&db, test_dir_db);
      CuAssert(tc,
               db!=0? db->error->message: "NULL",
-              page_db_new(&db, test_dir_db) == 0);
+              ret == 0);
      db->persist = 0;
 
      BFScheduler *sch;
+     ret = bf_scheduler_new(&sch, db);
      CuAssert(tc,
               sch != 0? sch->error->message: "NULL",
-              bf_scheduler_new(&sch, db) == 0);
+              ret == 0);
      sch->persist = 0;
 
      HitsScorer *scorer;
+     ret = hits_scorer_new(&scorer, db);
      CuAssert(tc,
               scorer != 0? scorer->error->message: "NULL",
-              hits_scorer_new(&scorer, db) == 0);
+              ret == 0);
 
      hits_scorer_set_use_content_scores(scorer, 1);
      hits_scorer_setup(scorer, sch->scorer);
      bf_scheduler_update_start(sch);
 
-     test_bf_scheduler_crawl(tc, sch, n_pages);
+     test_bf_scheduler_crawl(tc, sch, test_n_pages);
 
      bf_scheduler_update_stop(sch);
      bf_scheduler_delete(sch);
@@ -245,28 +244,15 @@ test_bf_scheduler_hits(CuTest *tc, size_t n_pages) {
      page_db_delete(db);
 }
 
-void
-test_bf_scheduler_large_hits(CuTest *tc) {
-     test_bf_scheduler_hits(tc, 10000000);
-}
-
-void
-test_bf_scheduler_very_large_hits(CuTest *tc) {
-     test_bf_scheduler_hits(tc, 100000000);
-}
-
 CuSuite *
-test_bf_scheduler_suite(TestOps ops) {
+test_bf_scheduler_suite(size_t n_pages) {
+     test_n_pages = n_pages;
+
      CuSuite *suite = CuSuiteNew();
      SUITE_ADD_TEST(suite, test_bf_scheduler_requests);
-     if (ops == test_all || ops == test_large) {
-          SUITE_ADD_TEST(suite, test_bf_scheduler_large_page_rank);
-          SUITE_ADD_TEST(suite, test_bf_scheduler_large_hits);
-     }
-     if (ops == test_all) {
-          SUITE_ADD_TEST(suite, test_bf_scheduler_very_large_page_rank);
-          SUITE_ADD_TEST(suite, test_bf_scheduler_very_large_hits);
-     }
+
+     SUITE_ADD_TEST(suite, test_bf_scheduler_page_rank);
+     SUITE_ADD_TEST(suite, test_bf_scheduler_hits);
 
      return suite;
 }

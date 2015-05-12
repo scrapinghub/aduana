@@ -1,4 +1,4 @@
-# Description
+# Description [![Build Status](https://travis-ci.org/plafl/aduana.svg?branch=master)](https://travis-ci.org/plafl/aduana)
 A proof of concept to demonstrate that is possible to
 use a single computer to direct a crawl using
 [PageRank](http://en.wikipedia.org/wiki/PageRank),

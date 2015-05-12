@@ -405,9 +405,8 @@ hashidx_stream_delete(HashIdxStream *st);
 
 #if (defined TEST) && TEST
 #include "CuTest.h"
-#include "test.h"
 CuSuite *
-test_page_db_suite(TestOps ops);
+test_page_db_suite(size_t n_pages);
 #endif
 
 #endif // __PAGE_DB_H

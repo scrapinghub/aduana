@@ -1,5 +1,4 @@
 #include "CuTest.h"
-#include "test.h"
 
 /* Tests the loading/dumping of PageInfo from and into LMDB values */
 void
@@ -43,9 +42,10 @@ test_page_db_simple(CuTest *tc) {
      mkdtemp(test_dir);
 
      PageDB *db;
+     int ret = page_db_new(&db, test_dir);
      CuAssert(tc,
               db!=0? db->error->message: "NULL",
-              page_db_new(&db, test_dir) == 0);
+              ret == 0);
      db->persist = 0;
 
      CrawledPage *cp1 = crawled_page_new("www.yahoo.com");
@@ -187,15 +187,18 @@ test_page_db_simple(CuTest *tc) {
      page_db_delete(db);
 }
 
+static size_t test_n_pages = 50000;
+
 static void
-test_page_db_crawl(CuTest *tc, size_t n_pages) {
+test_page_db_crawl(CuTest *tc) {
      char test_dir[] = "test-pagedb-XXXXXX";
      mkdtemp(test_dir);
 
      PageDB *db;
+     int ret = page_db_new(&db, test_dir);
      CuAssert(tc,
               db!=0? db->error->message: "NULL",
-              page_db_new(&db, test_dir) == 0);
+              ret == 0);
      db->persist = 0;
 
      const size_t n_links = 10;
@@ -207,13 +210,13 @@ test_page_db_crawl(CuTest *tc, size_t n_pages) {
      }
      time_t start = time(0);
      printf("%s: \n", __func__);
-     for (size_t i=0; i<n_pages; ++i) {
+     for (size_t i=0; i<test_n_pages; ++i) {
 #if 1
           if (i % 10000 == 0) {
                double delta = difftime(time(0), start);
                if (delta > 0) {
-                    printf("%10zuK/%zuM: %9zu pages/sec\n",
-                           i/1000, n_pages/1000000, i/((size_t)delta));
+                    printf("%10zuK/%zuK: %9zu pages/sec\n",
+                           i/1000, test_n_pages/1000, i/((size_t)delta));
                }
           }
 #endif
@@ -243,9 +246,10 @@ test_page_db_crawl(CuTest *tc, size_t n_pages) {
               page_db_link_stream_new(&st, db) == 0);
 
      Hits *hits;
+     ret = hits_new(&hits, test_dir, test_n_pages);
      CuAssert(tc,
               hits!=0? hits->error->message: "NULL",
-              hits_new(&hits, test_dir, n_pages) == 0);
+              ret == 0);
 
      hits->precision = 1e-3;
      CuAssert(tc,
@@ -262,18 +266,6 @@ test_page_db_crawl(CuTest *tc, size_t n_pages) {
      page_db_link_stream_delete(st);
 
      page_db_delete(db);
-}
-
-/* Tests the typical database operations on a moderate crawl of 10M pages */
-void
-test_page_db_large(CuTest *tc) {
-     test_page_db_crawl(tc, 10000000);
-}
-
-/* Tests the typical database operations on a big crawl of 100M pages */
-void
-test_page_db_very_large(CuTest *tc) {
-     test_page_db_crawl(tc, 100000000);
 }
 
 /* Checks the accuracy of the HITS computation */
@@ -302,9 +294,10 @@ test_page_db_hits(CuTest *tc) {
      mkdtemp(test_dir);
 
      PageDB *db;
+     int ret = page_db_new(&db, test_dir);
      CuAssert(tc,
               db!=0? db->error->message: "NULL",
-              page_db_new(&db, test_dir) == 0);
+              ret == 0);
      db->persist = 0;
 
      char *urls[5] = {"1", "2", "3", "4", "5" };
@@ -338,9 +331,10 @@ test_page_db_hits(CuTest *tc) {
               page_db_link_stream_new(&st, db) == 0);
 
      Hits *hits;
+     ret = hits_new(&hits, test_dir, 5);
      CuAssert(tc,
               hits!=0? hits->error->message: "NULL",
-              hits_new(&hits, test_dir, 5) == 0);
+              ret == 0);
 
      hits->precision = 1e-8;
      CuAssert(tc,
@@ -442,9 +436,10 @@ test_page_db_page_rank(CuTest *tc) {
      mkdtemp(test_dir);
 
      PageDB *db;
+     int ret = page_db_new(&db, test_dir);
      CuAssert(tc,
               db!=0? db->error->message: "NULL",
-              page_db_new(&db, test_dir) == 0);
+              ret == 0);
      db->persist = 0;
 
      char *urls[5] = {"1", "2", "3", "4", "5" };
@@ -478,9 +473,10 @@ test_page_db_page_rank(CuTest *tc) {
               page_db_link_stream_new(&st, db) == 0);
 
      PageRank *pr;
+     ret = page_rank_new(&pr, test_dir, 5);
      CuAssert(tc,
               pr!=0? pr->error->message: "NULL",
-              page_rank_new(&pr, test_dir, 5) == 0);
+              ret == 0);
 
      pr->precision = 1e-6;
      CuAssert(tc,
@@ -518,9 +514,10 @@ test_hashidx_stream(CuTest *tc) {
      mkdtemp(test_dir);
 
      PageDB *db;
+     int ret = page_db_new(&db, test_dir);
      CuAssert(tc,
               db!=0? db->error->message: "NULL",
-              page_db_new(&db, test_dir) == 0);
+              ret == 0);
      db->persist = 0;
 
      CrawledPage *cp = crawled_page_new("1");
@@ -576,17 +573,15 @@ test_hashidx_stream(CuTest *tc) {
 }
 
 CuSuite *
-test_page_db_suite(TestOps ops) {
+test_page_db_suite(size_t n_pages) {
+     test_n_pages = n_pages;
+
      CuSuite *suite = CuSuiteNew();
      SUITE_ADD_TEST(suite, test_page_info_serialization);
      SUITE_ADD_TEST(suite, test_page_db_simple);
      SUITE_ADD_TEST(suite, test_page_db_hits);
      SUITE_ADD_TEST(suite, test_page_db_page_rank);
-     if (ops == test_all || ops == test_large)
-          SUITE_ADD_TEST(suite, test_page_db_large);
-     if (ops == test_all)
-          SUITE_ADD_TEST(suite, test_page_db_very_large);
-
+     SUITE_ADD_TEST(suite, test_page_db_crawl);
      SUITE_ADD_TEST(suite, test_hashidx_stream);
 
      return suite;
