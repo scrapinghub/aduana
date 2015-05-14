@@ -338,6 +338,10 @@ page_db_set_persist(PageDB *db, int value);
 /** Dump database to file in human readable format */
 PageDBError
 page_db_info_dump(PageDB *db, FILE *output);
+
+/** Dump database to file in human readable format */
+PageDBError
+page_db_links_dump(PageDB *db, FILE *output);
 /// @}
 
 /// @addtogroup LinkStream

@@ -1130,7 +1130,8 @@ page_db_delete(PageDB *db) {
 PageDBError
 page_db_info_dump(PageDB *db, FILE *output) {
      MDB_txn *txn;
-     MDB_cursor *cur;
+     MDB_cursor *cur_hash2info;
+     MDB_cursor *cur_hash2idx;
      MDB_val key;
      MDB_val val;
 
@@ -1140,10 +1141,12 @@ page_db_info_dump(PageDB *db, FILE *output) {
      txn = 0;
      if ((txn_manager_begin(db->txn_manager, MDB_RDONLY, &txn)) != 0)
           error = db->txn_manager->error->message;
-     else if ((mdb_rc = page_db_open_hash2info(txn, &cur)) != 0)
+     else if ((mdb_rc = page_db_open_hash2info(txn, &cur_hash2info)) != 0)
           error = "opening hash2info cursor";
-     else if ((mdb_rc = mdb_cursor_get(cur, &key, &val, MDB_FIRST)) != 0)
+     else if ((mdb_rc = mdb_cursor_get(cur_hash2info, &key, &val, MDB_FIRST)) != 0)
           error = "getting first element";
+     else if ((mdb_rc = page_db_open_hash2idx(txn, &cur_hash2idx)) != 0)
+          error = "opening hash2idx cursor";
 
      if (error != 0)
           goto on_error;
@@ -1155,16 +1158,22 @@ page_db_info_dump(PageDB *db, FILE *output) {
                error = "PageInfo error format";
                goto on_error;
           }
-          fprintf(output, "%"PRIu64"|", *(uint64_t*)key.mv_data);
-          fprintf(output, "%s|", pi->url);
-          fprintf(output, "%.1f|", pi->first_crawl);
-          fprintf(output, "%.1f|", pi->last_crawl);
-          fprintf(output, "%zu|", pi->n_changes);
-          fprintf(output, "%zu|", pi->n_crawls);
+          uint64_t idx;
+          if (page_db_get_idx_cur(db, cur_hash2idx, *(uint64_t*)key.mv_data, &idx) != 0) {
+               error = "Could not retrieve page index";
+               goto on_error;
+          }
+          fprintf(output, "%016"PRIx64" ", *(uint64_t*)key.mv_data);
+          fprintf(output, "%"PRIu64" ", idx);
+          fprintf(output, "%s ", pi->url);
+          fprintf(output, "%.1f ", pi->first_crawl);
+          fprintf(output, "%.1f ", pi->last_crawl);
+          fprintf(output, "%zu ", pi->n_changes);
+          fprintf(output, "%zu ", pi->n_crawls);
           fprintf(output, "%.3e\n", pi->score);
           page_info_delete(pi);
 
-          switch (mdb_rc = mdb_cursor_get(cur, &key, &val, MDB_NEXT)) {
+          switch (mdb_rc = mdb_cursor_get(cur_hash2info, &key, &val, MDB_NEXT)) {
           case 0: // do nothing
                break;
           case MDB_NOTFOUND:
@@ -1176,7 +1185,8 @@ page_db_info_dump(PageDB *db, FILE *output) {
           }
      } while (more_data);
 
-     mdb_cursor_close(cur);
+     mdb_cursor_close(cur_hash2info);
+     mdb_cursor_close(cur_hash2idx);
      txn_manager_abort(db->txn_manager, txn);
 
      return 0;
@@ -1187,6 +1197,25 @@ on_error:
      page_db_add_error(db, error);
 
      return db->error->code;
+}
+
+PageDBError
+page_db_links_dump(PageDB *db, FILE *output) {
+     PageDBLinkStream *stream;
+     if (page_db_link_stream_new(&stream, db) != 0)
+          return page_db_error_internal;
+
+     Link link;
+     StreamState state;
+     while ((state = page_db_link_stream_next(stream, &link)) == stream_state_next) {
+          fprintf(output, "%"PRIi64" %"PRIi64"\n", link.from, link.to);
+     }
+     page_db_link_stream_delete(stream);
+
+     if (state != stream_state_end)
+          return page_db_error_internal;
+
+     return 0;
 }
 
 /** Set persist option for database */
