@@ -27,6 +27,7 @@ not be difficult but right now I have no time.
 
 # Requirements
 - CMake and C compiler (C99 support, gcc or clang for example)
+- Pthreads
 - Python (2.7 tested)
 
 # Installation
