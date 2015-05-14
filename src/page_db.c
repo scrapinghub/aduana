@@ -3,6 +3,7 @@
 #define _GNU_SOURCE 1
 
 #include <errno.h>
+#include <inttypes.h>
 #include <limits.h>
 #include <malloc.h>
 #include <stdint.h>
@@ -1124,6 +1125,68 @@ page_db_delete(PageDB *db) {
      error_delete(db->error);
      free(db);
      return 0;
+}
+
+PageDBError
+page_db_info_dump(PageDB *db, FILE *output) {
+     MDB_txn *txn;
+     MDB_cursor *cur;
+     MDB_val key;
+     MDB_val val;
+
+     int mdb_rc;
+     char *error = 0;
+
+     txn = 0;
+     if ((txn_manager_begin(db->txn_manager, MDB_RDONLY, &txn)) != 0)
+          error = db->txn_manager->error->message;
+     else if ((mdb_rc = page_db_open_hash2info(txn, &cur)) != 0)
+          error = "opening hash2info cursor";
+     else if ((mdb_rc = mdb_cursor_get(cur, &key, &val, MDB_FIRST)) != 0)
+          error = "getting first element";
+
+     if (error != 0)
+          goto on_error;
+
+     int more_data = 1;
+     do {
+          PageInfo *pi = page_info_load(&val);
+          if (!pi) {
+               error = "PageInfo error format";
+               goto on_error;
+          }
+          fprintf(output, "%"PRIu64"|", *(uint64_t*)key.mv_data);
+          fprintf(output, "%s|", pi->url);
+          fprintf(output, "%.1f|", pi->first_crawl);
+          fprintf(output, "%.1f|", pi->last_crawl);
+          fprintf(output, "%zu|", pi->n_changes);
+          fprintf(output, "%zu|", pi->n_crawls);
+          fprintf(output, "%.3e\n", pi->score);
+          page_info_delete(pi);
+
+          switch (mdb_rc = mdb_cursor_get(cur, &key, &val, MDB_NEXT)) {
+          case 0: // do nothing
+               break;
+          case MDB_NOTFOUND:
+               more_data = 0;
+               break;
+          default:
+               error = mdb_strerror(mdb_rc);
+               goto on_error;
+          }
+     } while (more_data);
+
+     mdb_cursor_close(cur);
+     txn_manager_abort(db->txn_manager, txn);
+
+     return 0;
+on_error:
+     if (txn)
+          txn_manager_abort(db->txn_manager, txn);
+     page_db_set_error(db, page_db_error_internal, __func__);
+     page_db_add_error(db, error);
+
+     return db->error->code;
 }
 
 /** Set persist option for database */

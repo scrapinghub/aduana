@@ -69,6 +69,10 @@ add_library(pagedb SHARED ${PAGE_DB_SRC})
 include_directories(src)
 target_link_libraries(pagedb pthread)
 
+add_executable(page_db_dump src/page_db_dump.c)
+target_link_libraries(page_db_dump pagedb)
+
 # Installation
 #############################################################
 install(TARGETS pagedb DESTINATION lib)
+install(TARGETS page_db_dump DESTINATION bin)
