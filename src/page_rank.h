@@ -10,26 +10,7 @@
  * See for example [Wikipedia](http://en.wikipedia.org/wiki/PageRank).
  *
  * Additionally, it allows to merge the pure link based original algorithm with
- * page content scores. The idea is that the PageRank score is distributed
- * according to the content score. For example imagine that page A links to B,
- * C and D and the scores are:
- *
- * - B: 0.5
- * - C: 0.1
- * - D: 0.9
- *
- * Page A then contributes to each page:
-   @verbatim
-                        0.5
-   PageRank(B) += ----------------- PageRank(A) = 0.33 * PageRank(A)
-                   0.5 + 0.1 + 0.9
-
-   PageRank(C) += 0.067 * PageRank(A)
-
-   PageRank(D) += 0.6 * PageRank(A)
-
-   @endverbatim
- *
+ * page content scores.
  * @{
  */
 
@@ -74,6 +55,8 @@ typedef struct {
      float damping;
      /** External computed scores associated with the pages */
      MMapArray *scores;
+     /** Total score */
+     float total_score;
      /** If greater than 0 stop computation even if precision was not achieved */
      size_t max_loops;
      /** Stop iteration when the the largest change in any page score is below

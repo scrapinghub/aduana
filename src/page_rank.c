@@ -187,6 +187,7 @@ page_rank_init(PageRank *pr,
 
      Link link;
      int end_stream = 0;
+     pr->total_score = 0.0;
      do {
           switch(link_stream_next(stream_state, &link)) {
           case stream_state_init:
@@ -206,18 +207,20 @@ page_rank_init(PageRank *pr,
                float *deg = mmap_array_idx(pr->out_degree, link.from);
                if (!deg)
                     return page_rank_error_internal;
-               if (!pr->scores) {
-                    ++(*deg);
-               } else {
+               ++(*deg);
+               if (pr->scores) {
                     // if scores are available out_degree represents the total
                     // score of all outgoing links
                     float *score = mmap_array_idx(pr->scores, link.to);
                     if (score)
-                         *deg += *score;
+                         pr->total_score += *score;
                }
                break;
           }
      } while (!end_stream);
+
+     if (pr->total_score == 0)
+          pr->total_score = 1.0;
 
      // Since its possible that the number of pages has changed, renormalize
      if (mmap_array_advise(pr->value1, MADV_SEQUENTIAL) != 0) {
@@ -302,16 +305,8 @@ page_rank_loop(PageRank *pr,
                     goto on_error;
                }
 #endif
-               if (value1 && value2 && degree) {
-                    float weight;
-                    if (pr->scores) {
-                         float *score = mmap_array_idx(pr->scores, link.to);
-                         weight = score? (*score)/(*degree): 0.0;
-                    } else {
-                         weight = 1.0/(*degree);
-                    }
-                    *value2 += pr->damping*(*value1)*weight;
-               }
+               if (value1 && value2 && degree)
+                    *value2 += pr->damping*(*value1)/(*degree);
                break;
           }
      } while (!end_stream);
@@ -339,16 +334,26 @@ page_rank_end_loop(PageRank *pr, float *delta) {
           goto on_error;
      }
 
-     float sum = 0.0;
+     float rem = 0.0;
      for (size_t i=0; i<pr->n_pages; ++i) {
           float *score = mmap_array_idx(pr->value2, i);
-          sum += *score;
+          rem += *score;
      }
-     sum = (1.0 - sum)/pr->n_pages;
+     rem = 1.0 - rem;
 
-     for (size_t i=0; i<pr->n_pages; ++i) {
-          float *score = mmap_array_idx(pr->value2, i);
-          *score += sum;
+     if (!pr->scores) {
+          float r = rem/pr->n_pages;
+          for (size_t i=0; i<pr->n_pages; ++i) {
+               float *score = mmap_array_idx(pr->value2, i);
+               *score += r;
+          }
+     } else {
+          for (size_t i=0; i<pr->n_pages; ++i) {
+               float *r = mmap_array_idx(pr->scores, i);
+               *r /= pr->total_score;
+               float *score = mmap_array_idx(pr->value2, i);
+               *score += rem*(*r);
+          }
      }
 
      *delta = 0.0;
