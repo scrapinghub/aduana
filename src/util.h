@@ -177,6 +177,10 @@ varint_decode_int64(uint8_t *in, uint8_t* read);
 
 /// @}
 
+/** Extract domain from a valid http URL */
+int
+url_domain(const char *url, int *start, int *end);
+
 #ifdef _WIN32
 void
 mkdtemp(char *template);

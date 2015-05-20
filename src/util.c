@@ -175,6 +175,81 @@ varint_decode_int64(uint8_t *in, uint8_t* read) {
           return -((res - 1)/2);
 }
 
+int
+url_domain(const char *url, int *start, int *end) {
+     //     +-- colon 1
+     //     |      +-- colon 2                +-- slash 3
+     //     v      v                          v
+     // http://user:passwd@www.blabla.com:8080/foo#3
+     //      ^^           |              ^
+     //      |+-- slash 2 +-- at         +-- colon 3
+     //      +-- slash 1
+     int colon2 = -1;
+     int colon3 = -1;
+     int at = -1;
+     int slash2 = -1;
+     int slash3 = -1;
+
+     int i = 0;
+
+     // read "http[s]://" or fail
+     if ((url[i++] != 'h') ||
+         (url[i++] != 't') ||
+         (url[i++] != 't') ||
+         (url[i++] != 'p'))
+          return -1;
+     if (url[i] == 's')
+          i++;
+     if (url[i++] != ':' ||
+         url[i++] != '/' ||
+         url[i++] != '/')
+          return -1;
+
+     slash2 = i - 1;
+
+     int n_colon = 1;
+     for (; slash3 == -1; i++) {
+          switch (url[i]) {
+          case '\0':
+               slash3 = i;
+               break;
+          case ':':
+               switch (n_colon++) {
+               case 1:
+                    colon2 = i;
+                    break;
+               case 2:
+                    if (at == -1)
+                         return -1;
+                    colon3 = i;
+                    break;
+               default:
+                    return -1;
+               }
+               break;
+          case '@':
+               if (at == -1)
+                    at = i;
+               else
+                    return -1;
+               break;
+          case '/':
+               if (slash3 == -1)
+                    slash3 = i;
+               else
+                    return -1;
+          }
+     }
+     if (at == -1) {
+          *start = slash2 + 1;
+          *end = colon2 == -1? slash3 - 1: colon2 - 1;
+     } else {
+          *start = at + 1;
+          *end = colon3 == -1? slash3 - 1: colon3 - 1;
+     }
+     return 0;
+}
+
 #ifdef _WIN32
 #include <io.h>
 void

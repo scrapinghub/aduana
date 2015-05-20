@@ -466,7 +466,16 @@ static char info_n_pages[] = "n_pages";
 
 uint64_t
 page_db_hash(const char *url) {
-     return XXH64(url, strlen(url), 0);
+     int start, end;
+     uint64_t hash_full;
+     uint32_t *hash_part = (uint32_t*)&hash_full;
+     if (url_domain(url, &start, &end) != 0)
+          hash_part[1] = 0;
+     else
+          hash_part[1] = XXH32(url + start, end - start + 1, 0);
+
+     hash_part[0] = XXH32(url, strlen(url), 0);
+     return hash_full;
 }
 
 static int
@@ -777,7 +786,7 @@ page_db_add(PageDB *db, const CrawledPage *page, PageInfoList **page_info_list) 
      }
      size_t n_pages = *(size_t*)val.mv_data;
 
-     uint64_t hash = XXH64(page->url, strlen(page->url), 0);
+     uint64_t hash = page_db_hash(page->url);
      key.mv_size = sizeof(uint64_t);
      key.mv_data = &hash;
 
@@ -806,7 +815,7 @@ page_db_add(PageDB *db, const CrawledPage *page, PageInfoList **page_info_list) 
      for (size_t i=0; i <= n_links; ++i) {
           const LinkInfo *link = i > 0? crawled_page_get_link(page, i - 1): 0;
           if (link) {
-               hash = XXH64(link->url, strlen(link->url), 0);
+               hash = page_db_hash(link->url);
                key.mv_size = sizeof(uint64_t);
                key.mv_data = &hash;
           }

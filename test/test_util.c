@@ -43,8 +43,47 @@ test_varint_int64(CuTest *tc) {
                             varint_decode_int64(next, &read));
           next += read;
      }
+}
 
+void
+test_url_domain(CuTest *tc) {
+     char *url[] = {
+          "https://fr.m.wikipedia.org/wiki/Jeudi",
+          "https://apps.hclib.org/catalog/results.cfm?fq=author_f%3AUnited+States.+Congress.+Senate",
+          "http://www.jstor.org:1000/stable/143091",
+          "http://mlb.mlb.com/mlb/history/postseason/mlb_lcs.jsp?feature=mvp",
+          "https://inclass.kaggle.com/c/adcg-ss14-challenge-03/forums/t/8293/jumbled-leaderboard/47136",
+          "http://foo:xxyy@blabla.org"
+     };
+     char *domain[] = {
+          "fr.m.wikipedia.org",
+          "apps.hclib.org",
+          "www.jstor.org",
+          "mlb.mlb.com",
+          "inclass.kaggle.com",
+          "blabla.org"
+     };
+     int n_url = sizeof(url)/sizeof(char*);
+     int start[n_url];
+     int end[n_url];
+     start[0] = start[1] = start[4] = strlen("https://");
+     start[2] = start[3] = strlen("http://");
+     start[5] = strlen("http://foo:xxyy@");
 
+     for (int i=0; i<n_url; ++i)
+          end[i] = start[i] + strlen(domain[i]) - 1;
+
+     int s, e;
+     for (int i=0; i<n_url; ++i) {
+          CuAssert(tc,
+                   "Failed to parse URL",
+                   url_domain(url[i], &s, &e) == 0);
+          CuAssertIntEquals(tc, start[i], s);
+          CuAssertIntEquals(tc, end[i], e);
+     }
+     CuAssert(tc,
+              "Parsed incorrect URL",
+              url_domain("xxxxx", &s, &e) == -1);
 }
 
 CuSuite *
@@ -52,6 +91,6 @@ test_util_suite() {
      CuSuite *suite = CuSuiteNew();
      SUITE_ADD_TEST(suite, test_varint_uint64);
      SUITE_ADD_TEST(suite, test_varint_int64);
-
+     SUITE_ADD_TEST(suite, test_url_domain);
      return suite;
 }
