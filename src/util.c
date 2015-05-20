@@ -250,6 +250,31 @@ url_domain(const char *url, int *start, int *end) {
      return 0;
 }
 
+int
+same_domain(const char *url1, const char *url2) {
+     int s1, e1;
+     int parse1 = url_domain(url1, &s1, &e1);
+     int s2, e2;
+     int parse2 = url_domain(url2, &s2, &e2);
+
+     if (parse1 == 0) {
+          if (parse2 == 0) {
+               if ((e2 - s2) != (e1 - s1))
+                    return 0;
+               while ((s2 <= e2) && (s1 <= e1))
+                    if (url1[s1++] != url2[s2++])
+                         return 0;
+               return 1;
+          } else {
+               return 0;
+          }
+     } else if (parse2 == 0) {
+          return 0;
+     } else {
+          return strcmp(url1, url2) == 0? 1: 0;
+     }
+}
+
 #ifdef _WIN32
 #include <io.h>
 void

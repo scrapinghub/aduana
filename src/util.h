@@ -181,6 +181,10 @@ varint_decode_int64(uint8_t *in, uint8_t* read);
 int
 url_domain(const char *url, int *start, int *end);
 
+/** 1 if the two URLs share the same domain */
+int
+same_domain(const char *url1, const char *url2);
+
 #ifdef _WIN32
 void
 mkdtemp(char *template);

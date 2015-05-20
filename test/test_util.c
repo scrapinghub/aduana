@@ -86,11 +86,32 @@ test_url_domain(CuTest *tc) {
               url_domain("xxxxx", &s, &e) == -1);
 }
 
+void
+test_same_domain(CuTest *tc) {
+     CuAssertIntEquals(tc,
+                       1,
+                       same_domain("http://blablabla/foo",
+                                   "https://blablabla/xxx/aaa"));
+     CuAssertIntEquals(tc,
+                       1,
+                       same_domain("http://www.abcde.org/foo",
+                                   "http://spam:eggs@www.abcde.org"));
+     CuAssertIntEquals(tc,
+                       1,
+                       same_domain("xyz",
+                                   "xyz"));
+     CuAssertIntEquals(tc,
+                       0,
+                       same_domain("http://blablabla/foo",
+                                   "http://blablabla.com/foo"));              
+}
+
 CuSuite *
 test_util_suite() {
      CuSuite *suite = CuSuiteNew();
      SUITE_ADD_TEST(suite, test_varint_uint64);
      SUITE_ADD_TEST(suite, test_varint_int64);
      SUITE_ADD_TEST(suite, test_url_domain);
+     SUITE_ADD_TEST(suite, test_same_domain);
      return suite;
 }
