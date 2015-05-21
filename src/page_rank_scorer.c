@@ -138,6 +138,11 @@ page_rank_scorer_set_use_content_scores(PageRankScorer *prs, int value) {
      prs->use_content_scores = value;
 }
 
+void
+page_rank_scorer_set_damping(PageRankScorer *prs, float value) {
+     prs->page_rank->damping = value;
+}
+
 #if (defined TEST) && TEST
 #include "CuTest.h"
 

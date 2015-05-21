@@ -86,6 +86,10 @@ page_rank_scorer_set_persist(PageRankScorer *prs, int value);
 /** Sets @ref PageRankScorer::use_content_scores */
 void
 page_rank_scorer_set_use_content_scores(PageRankScorer *prs, int value);
+
+/** Sets @ref PageRankScorer::page_rank::damping */
+void
+page_rank_scorer_set_damping(PageRankScorer *prs, float value);
 /// @}
 
 #endif // __PAGE_RANK_SCORER_H__
