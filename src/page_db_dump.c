@@ -33,7 +33,7 @@ main(int argc, char **argv) {
           if (!output) {
                int errno_cp = errno;
                fprintf(stderr, "Could not open output file: ");
-               fprintf(stderr, strerror(errno_cp));
+               fprintf(stderr, "%s", strerror(errno_cp));
                fprintf(stderr, "\n");
                return -1;
           }
@@ -44,7 +44,7 @@ main(int argc, char **argv) {
      PageDB *page_db = 0;
      if (page_db_new(&page_db, argv[2]) != 0) {
           fprintf(stderr, "Error opening page database: ");
-          fprintf(stderr, page_db? page_db->error->message: "NULL");
+          fprintf(stderr, "%s", page_db? page_db->error->message: "NULL");
           fprintf(stderr, "\n");
           return -1;
      }
@@ -58,7 +58,7 @@ main(int argc, char **argv) {
 
      if (dump_error) {
           fprintf(stderr, "Error dumping database:");
-          fprintf(stderr, page_db->error->message);
+          fprintf(stderr, "%s", page_db->error->message);
           fprintf(stderr, "\n");
           return -1;
      }
