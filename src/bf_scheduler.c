@@ -52,8 +52,8 @@ schedule_entry_mdb_cmp(const MDB_val *a, const MDB_val *b) {
      ScheduleKey *se_a = (ScheduleKey*)a->mv_data;
      ScheduleKey *se_b = (ScheduleKey*)b->mv_data;
      return
-          se_a->score < se_b->score? -1:
-          se_a->score > se_b->score? +1:
+          se_a->score < se_b->score? +1:
+          se_a->score > se_b->score? -1:
           // equal scores, order by hash
           se_a->hash  < se_b->hash? -1:
           se_a->hash  > se_b->hash? +1: 0;
@@ -230,7 +230,7 @@ bf_scheduler_add(BFScheduler *sch, const CrawledPage *page) {
                if (sch->scorer->state)
                     sch->scorer->add(sch->scorer->state, pi, &se.score);
                else
-                    se.score = -pi->score;
+                    se.score = pi->score;
                MDB_val key = {
                     .mv_size = sizeof(se),
                     .mv_data = &se
@@ -457,7 +457,6 @@ bf_scheduler_update_thread(void *arg) {
      do {
           if ((rc = pthread_mutex_lock(&sch->update_thread->n_pages_mutex)) != 0)
                goto error_thread;
-
           while ((sch->update_thread->n_pages_new < sch->update_thread->n_pages_old + 1000.0) ||
                  (sch->update_thread->n_pages_new < 1.1*sch->update_thread->n_pages_old)) {
                if ((rc = pthread_cond_wait(&sch->update_thread->n_pages_cond,
