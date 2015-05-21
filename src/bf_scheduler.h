@@ -30,7 +30,7 @@
     new pages to the schedule and returning requests also start write transactions
     it means that the update thread could block this more critical operations.
     To avoid this we avoid long write transactions and split them in batches. */
-#define BF_SCHEDULER_UPDATE_BATCH_SIZE 1000
+#define BF_SCHEDULER_UPDATE_BATCH_SIZE 100
 
 /** Default value for BFScheduler::persist */
 #define BF_SCHEDULER_DEFAULT_PERSIST 1
