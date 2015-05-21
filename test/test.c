@@ -5,6 +5,8 @@
 #include "CuTest.h"
 
 #include "page_db.h"
+#include "page_rank.h"
+#include "hits.h"
 #include "bf_scheduler.h"
 
 int main(int argc, char **argv) {
@@ -29,6 +31,8 @@ int main(int argc, char **argv) {
      CuSuite *suite = CuSuiteNew();
 
      CuSuiteAddSuite(suite, test_page_db_suite(n_pages));
+     CuSuiteAddSuite(suite, test_page_rank_suite());
+     CuSuiteAddSuite(suite, test_hits_suite());
      CuSuiteAddSuite(suite, test_bf_scheduler_suite(n_pages));
      CuSuiteAddSuite(suite, test_util_suite());
      CuSuiteRun(suite);

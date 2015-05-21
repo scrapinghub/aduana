@@ -807,8 +807,19 @@ page_db_add(PageDB *db, const CrawledPage *page, PageInfoList **page_info_list) 
      }
 
      size_t n_links = crawled_page_n_links(page);
-     uint64_t *id = malloc((n_links + 1)*sizeof(*id));
-     if (!id) {
+     // store here links inside the same domain as the crawled page
+     uint64_t *same_id = malloc((n_links + 1)*sizeof(*same_id));
+     // store here links outside the domain of the crawled page
+     uint64_t *diff_id = malloc((n_links + 1)*sizeof(*diff_id));
+     // next link id is going to be written here
+     uint64_t *id = diff_id;
+     // number of id's in same_id and diff_id. The first element of diff_id
+     // array is reserved for the id of the crawled page, so we start at 1.
+     // The first element of same_id will be a copy of the last element of
+     // diff_id, so we start at 1 too.
+     uint64_t same_i = 1;
+     uint64_t diff_i = 1;
+     if (!same_id || !diff_id) {
           error = "could not malloc";
           goto on_error;
      }
@@ -818,16 +829,20 @@ page_db_add(PageDB *db, const CrawledPage *page, PageInfoList **page_info_list) 
                hash = page_db_hash(link->url);
                key.mv_size = sizeof(uint64_t);
                key.mv_data = &hash;
+
+               id = same_domain(page->url, link->url)?
+                    same_id + same_i++:
+                    diff_id + diff_i++;
           }
           val.mv_size = sizeof(uint64_t);
           val.mv_data = &n_pages;
 
           switch (mdb_rc = mdb_cursor_put(cur_hash2idx, &key, &val, MDB_NOOVERWRITE)) {
           case MDB_KEYEXIST: // not really an error
-               id[i] = *(uint64_t*)val.mv_data;
+               *id = *(uint64_t*)val.mv_data;
                break;
           case 0:
-               id[i] = n_pages++;
+               *id = n_pages++;
                if (link) {
                     if (page_db_add_link_page_info(cur_hash2info, &key, link, &pi, &mdb_rc) != 0) {
                          error = "adding/updating link info";
@@ -861,25 +876,42 @@ page_db_add(PageDB *db, const CrawledPage *page, PageInfoList **page_info_list) 
      }
 
      // store links and commit transaction
+     // The format for the links is the following:
+     //
+     // KEY = ID of crawled page
+     // VAL = Number of links to different domain,
+     //       diff link id 1, diff link id 2, ...
+     //       same link id 1, same link id 2, ...
+
      key.mv_size = sizeof(uint64_t);
-     key.mv_data = id;
+     key.mv_data = diff_id; // remember that diff_id[0] is the id of the
+                            // crawled page
      // the links are stored as deltas starting from the 'from' page, encoded
-     // using varint
-     uint8_t *buf = val.mv_data = malloc(10*n_links);
+     // using varint. The '10' is because an 8 byte number can grow up to 10
+     // bytes in size if encoded.
+     uint8_t *buf = val.mv_data = malloc(10*(n_links + 1));
      if (!buf) {
           error = "allocating memory to store links";
           goto on_error;
      }
-     for (size_t i=1; i<=n_links; ++i)
-          buf = varint_encode_int64((int64_t)id[i] - (int64_t)id[i-1], buf);
+     // write number of diff links (substract 1 to take into account this page id)
+     buf = varint_encode_uint64(diff_i - 1, buf);
+     // write diff links
+     for (size_t i=1; i<diff_i; ++i)
+          buf = varint_encode_int64((int64_t)diff_id[i] - (int64_t)diff_id[i-1], buf);
+     same_id[0] = diff_id[diff_i-1];
+     for (size_t i=1; i<same_i; ++i)
+          buf = varint_encode_int64((int64_t)same_id[i] - (int64_t)same_id[i-1], buf);
+
      val.mv_size = (char*)buf - (char*)val.mv_data;
      if ((mdb_rc = mdb_cursor_put(cur_links, &key, &val, 0)) != 0) {
           error = "storing links";
           goto on_error;
      }
      free(val.mv_data);
-     free(id);
-     id = 0;
+     free(same_id);
+     free(diff_id);
+     same_id = diff_id = 0;
 
      if (txn_manager_commit(db->txn_manager, txn) != 0) {
           error = db->txn_manager->error->message;
@@ -888,8 +920,10 @@ page_db_add(PageDB *db, const CrawledPage *page, PageInfoList **page_info_list) 
      return db->error->code;
 
 on_error:
-     if (id)
-          free(id);
+     if (same_id)
+          free(same_id);
+     if (diff_id)
+          free(diff_id);
      if (txn)
           txn_manager_abort(db->txn_manager, txn);
 
@@ -899,7 +933,6 @@ on_error:
           page_db_add_error(db, mdb_strerror(mdb_rc));
 
      return db->error->code;
-
 }
 
 PageDBError
@@ -1213,6 +1246,7 @@ page_db_links_dump(PageDB *db, FILE *output) {
      PageDBLinkStream *stream;
      if (page_db_link_stream_new(&stream, db) != 0)
           return page_db_error_internal;
+     stream->only_diff_domain = 0;
 
      Link link;
      StreamState state;
@@ -1239,7 +1273,10 @@ page_db_set_persist(PageDB *db, int value) {
 /// @{
 
 static int
-page_db_link_stream_copy_links(PageDBLinkStream *es, MDB_val *key, MDB_val *val) {
+page_db_link_stream_copy_links(PageDBLinkStream *es,
+                               MDB_val *key,
+                               MDB_val *val,
+                               int only_diff_domain) {
      // decompressing varints can expand size at most 8x
      size_t max_size = 8*val->mv_size;
      if (max_size > es->m_to) {
@@ -1252,12 +1289,20 @@ page_db_link_stream_copy_links(PageDBLinkStream *es, MDB_val *key, MDB_val *val)
      es->i_to = 0;
      es->n_to = 0;
      uint64_t id = es->from = *(uint64_t*)key->mv_data;
+
+     uint8_t read = 0;
+     es->n_diff = varint_decode_uint64(val->mv_data, &read);
+
      uint8_t *pos = (uint8_t*)val->mv_data;
      uint8_t *end = pos + val->mv_size/sizeof(uint8_t);
+     pos += read;
      while (pos < end) {
-          uint8_t read = 0;
           es->to[es->n_to++] = id += varint_decode_int64(pos, &read);
           pos += read;
+
+          if (only_diff_domain &&
+              (es->n_to == es->n_diff))
+               break;
      }
      return 0;
 }
@@ -1324,6 +1369,7 @@ page_db_link_stream_new(PageDBLinkStream **es, PageDB *db) {
      if (p == 0)
           return page_db_error_memory;
      p->db = db;
+     p->only_diff_domain = PAGE_DB_LINK_STREAM_DEFAULT_ONLY_DIFF_DOMAIN;
 
      StreamState state = page_db_link_stream_reset(p);
      if (state == stream_state_error) {
@@ -1362,7 +1408,7 @@ page_db_link_stream_next(void *st, Link *link) {
 
           switch (mdb_rc = mdb_cursor_get(es->cur, &key, &val, MDB_NEXT)) {
           case 0:
-               if (page_db_link_stream_copy_links(es, &key, &val) != 0)
+               if (page_db_link_stream_copy_links(es, &key, &val, es->only_diff_domain) != 0)
                     return page_db_error_internal;
                break;
           case MDB_NOTFOUND:

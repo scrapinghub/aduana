@@ -347,6 +347,8 @@ page_db_links_dump(PageDB *db, FILE *output);
 /// @addtogroup LinkStream
 /// @{
 
+/** Default value for PageDBLinkStream::only_diff_domain */
+#define PAGE_DB_LINK_STREAM_DEFAULT_ONLY_DIFF_DOMAIN 1
 
 typedef struct {
      PageDB *db; /** PageDB where links database is stored */
@@ -357,8 +359,12 @@ typedef struct {
      size_t n_to;   /**< Number of links */
      size_t i_to;   /**< Current position inside @ref to */
      size_t m_to;   /**< Allocated memory for @ref to. It must be that @ref n_to <= @ref m_to. */
+     size_t n_diff; /**< Number of out domain links */
 
      StreamState state;
+
+     /** If true only links that go to a different domain will be streamed */
+     int only_diff_domain;
 } PageDBLinkStream;
 
 /** Create a new stream from the given PageDB.

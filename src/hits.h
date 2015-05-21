@@ -144,4 +144,11 @@ hits_get_authority(const Hits *pr,
 void
 hits_set_persist(Hits *hits, int value);
 /// @}
+
+#if (defined TEST) && TEST
+#include "CuTest.h"
+CuSuite *
+test_hits_suite(void);
+#endif
+
 #endif // _HITS_H

@@ -384,3 +384,7 @@ hits_set_persist(Hits *hits, int value) {
      hits->persist = hits->h1->persist = hits->h2->persist =
           hits->a1->persist = hits->a2->persist = value;
 }
+
+#if (defined TEST) && TEST
+#include "test_hits.c"
+#endif // TEST

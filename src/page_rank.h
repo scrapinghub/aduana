@@ -125,4 +125,9 @@ page_rank_set_persist(PageRank *pr, int value);
 
 /// @}
 
+#if (defined TEST) && TEST
+#include "CuTest.h"
+CuSuite *
+test_page_rank_suite(void);
+#endif
 #endif // _PAGE_RANK_H

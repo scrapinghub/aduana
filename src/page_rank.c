@@ -185,9 +185,18 @@ page_rank_init(PageRank *pr,
      }
      mmap_array_zero(pr->out_degree);
 
+     pr->total_score = 0.0;
+     if (pr->scores)
+          for (size_t i=0; i<pr->scores->n_elements; ++i) {
+               float *score = mmap_array_idx(pr->scores, i);
+               if (score)
+                    pr->total_score += *score;
+          }
+     if (pr->total_score == 0)
+          pr->total_score = 1.0;
+
      Link link;
      int end_stream = 0;
-     pr->total_score = 0.0;
      do {
           switch(link_stream_next(stream_state, &link)) {
           case stream_state_init:
@@ -208,19 +217,9 @@ page_rank_init(PageRank *pr,
                if (!deg)
                     return page_rank_error_internal;
                ++(*deg);
-               if (pr->scores) {
-                    // if scores are available out_degree represents the total
-                    // score of all outgoing links
-                    float *score = mmap_array_idx(pr->scores, link.to);
-                    if (score)
-                         pr->total_score += *score;
-               }
                break;
           }
      } while (!end_stream);
-
-     if (pr->total_score == 0)
-          pr->total_score = 1.0;
 
      // Since its possible that the number of pages has changed, renormalize
      if (mmap_array_advise(pr->value1, MADV_SEQUENTIAL) != 0) {
@@ -350,9 +349,11 @@ page_rank_end_loop(PageRank *pr, float *delta) {
      } else {
           for (size_t i=0; i<pr->n_pages; ++i) {
                float *r = mmap_array_idx(pr->scores, i);
-               *r /= pr->total_score;
-               float *score = mmap_array_idx(pr->value2, i);
-               *score += rem*(*r);
+               if (r) {
+                    *r /= pr->total_score;
+                    float *score = mmap_array_idx(pr->value2, i);
+                    *score += rem*(*r);
+               }
           }
      }
 
@@ -445,3 +446,7 @@ page_rank_set_persist(PageRank *pr, int value) {
      pr->persist = pr->out_degree->persist =
           pr->value1->persist = pr->value2->persist = value;
 }
+
+#if (defined TEST) && TEST
+#include "test_page_rank.c"
+#endif // TEST
