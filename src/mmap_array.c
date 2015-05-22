@@ -218,7 +218,7 @@ mmap_array_resize(MMapArray *marr, size_t n_elements) {
           error = "resizing file";
           goto on_error;
      }
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__APPLE__)
      if (munmap(marr->mem, 0) != 0)
           marr->mem = MAP_FAILED;
      else
