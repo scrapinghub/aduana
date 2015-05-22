@@ -1,17 +1,27 @@
 #define _POSIX_C_SOURCE 200809L
 #define _BSD_SOURCE 1
 
+#ifdef __APPLE__
+#define MADV_RANDOM 1
+#define MADV_SEQUENTIAL 2
+#define MADV_DONTNEED 4
+#endif
+
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
+#ifdef __APPLE__
+#include <malloc/malloc.h>
+#else
 #include <malloc.h>
+#endif
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
-#ifdef _WIN32
+#if defined(_WIN32) 
 #include "mman.h"
 #else
 #include <sys/mman.h>

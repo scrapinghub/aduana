@@ -5,7 +5,11 @@
 #include <assert.h>
 #include <errno.h>
 #include <lmdb.h>
+#ifdef __APPLE__
+#include <malloc/malloc.h>
+#else
 #include <malloc.h>
+#endif
 #include <pthread.h>
 #include <string.h>
 #include <sys/stat.h>

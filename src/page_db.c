@@ -5,7 +5,11 @@
 #include <errno.h>
 #include <inttypes.h>
 #include <limits.h>
+#ifdef __APPLE__
+#include <malloc/malloc.h>
+#else
 #include <malloc.h>
+#endif
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
