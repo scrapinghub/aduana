@@ -255,12 +255,14 @@ test_page_db_crawl(CuTest *tc) {
               ret == 0);
 
      hits->precision = 1e-3;
-     CuAssert(tc,
-              hits->error->message,
-              hits_compute(hits,
-                           st,
-                           page_db_link_stream_next,
-                           page_db_link_stream_reset) == 0);
+     HitsError hits_err = hits_compute(hits,
+                                       st,
+                                       page_db_link_stream_next,
+                                       page_db_link_stream_reset);
+     if (hits_err == hits_error_precision)
+          hits_err = 0;
+
+     CuAssert(tc, hits->error->message, hits_err == 0);
 
      CuAssert(tc,
               hits->error->message,
