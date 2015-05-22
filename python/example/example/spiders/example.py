@@ -5,16 +5,11 @@ from scrapy.spider import Spider
 from scrapy.contrib.linkextractors.lxmlhtml import LxmlLinkExtractor
 from scrapy.selector import Selector
 
-def load_keywords(fname):
-    with open(fname, 'r') as kw_file:   
-        kw = [unicode(line.strip(), "utf-8") for line in kw_file]
-    return kw
+from scorer import KeywordScorer
 
 class MySpider(Spider):
     name = 'example'
     link_extractor = LxmlLinkExtractor()
-    keywords = load_keywords('keywords.txt')
-    max_score = float(len(keywords))
         
     def parse(self, response):
         soup = BeautifulSoup(response.body)
@@ -22,15 +17,11 @@ class MySpider(Spider):
             script.extract()
         text = soup.get_text()
 
-        score = 0.0
-        for kw in self.keywords:
-            if kw in text:
-                score += 1.0
-        score /= self.max_score
-        response.meta.update(score=score)
+        response.meta.update(score=KeywordScorer.score(text))
 
         for link in self.link_extractor.extract_links(response):
             request = Request(url=link.url)
             request.meta.update(link_text=link.text)
-            request.meta.update(score=score)
+            link_score = KeywordScorer.score(link.text)
+            request.meta.update(score=link_score)
             yield request

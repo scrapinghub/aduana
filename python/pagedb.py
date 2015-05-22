@@ -227,6 +227,9 @@ C_PAGE_DB.page_rank_scorer_set_persist.restype = None
 C_PAGE_DB.page_rank_scorer_set_use_content_scores.argtypes = [ct.POINTER(c_PageRankScorer), ct.c_int]
 C_PAGE_DB.page_rank_scorer_set_use_content_scores.restype = None
 
+C_PAGE_DB.page_rank_scorer_set_damping.argtypes = [ct.POINTER(c_PageRankScorer), ct.c_float]
+C_PAGE_DB.page_rank_scorer_set_damping.restype = None
+
 class PageRankScorer(object):
     def __init__(self, page_db):
         self._c_page_db = C_PAGE_DB
@@ -255,6 +258,14 @@ class PageRankScorer(object):
     @use_content_scores.setter
     def use_content_scores(self, value):
         self._c_page_db.page_rank_scorer_set_use_content_scores(self._scorer, value)
+
+    @property
+    def damping(self):
+        return self._scorer.contents.page_rank.contents.damping
+
+    @damping.setter
+    def damping(self, value):
+        self._c_page_db.page_rank_scorer_set_damping(self._scorer, value)
 
 
 class c_HitsScorer(ct.Structure):

@@ -4,7 +4,7 @@ import tempfile
 import pagedb
 
 class Backend(frontera.Backend):
-    def __init__(self, db=None, scorer_class=pagedb.HitsScorer, use_scores=False):
+    def __init__(self, db=None, scorer_class=pagedb.PageRankScorer, use_scores=False):
         if db:
             db_path = db
             persist = 1
@@ -13,20 +13,42 @@ class Backend(frontera.Backend):
             persist = 0
 
         self._page_db = pagedb.PageDB(db_path)
-        self._scorer = scorer_class(self._page_db)
-        if use_scores:
-            self._scorer.use_content_scores = 1
+
+        if scorer_class is None:
+            self._scorer = None
+        else:
+            self._scorer = scorer_class(self._page_db)
+            if use_scores:
+                if scorer_class == pagedb.PageRankScorer:
+                    self._scorer.damping = 0.5
+                self._scorer.use_content_scores = 1
 
         self._scheduler = pagedb.BFScheduler(
             self._page_db,
-            scorer = self._scorer
+            scorer=self._scorer,
+            persist=persist
         )
+        self._n_seeds = 0
 
     @classmethod
     def from_manager(cls, manager):
+        scorer = manager.settings.get('SCORER', None)
+        if scorer:
+            try:
+                scorer_class = getattr(pagedb, scorer)
+            except AttributeError:
+                manager.logger.backend.warning(
+                    'Cannot load scorer class {0}. Using content scorer'.format(scorer))
+                scorer_class = None
+        else:
+            manager.logger.backend.warning(
+                'No SCORER setting. Using default content scorer')
+            scorer_class = None
+
         return cls(
             db=manager.settings.get('PAGE_DB_PATH', None),
-            use_scores=manager.settings.get('USE_SCORES', False)
+            use_scores=manager.settings.get('USE_SCORES', False),
+            scorer_class=scorer_class
         )
 
     def frontier_start(self):
@@ -38,10 +60,11 @@ class Backend(frontera.Backend):
     def add_seeds(self, seeds):
         self._scheduler.add(
             pagedb.CrawledPage(
-                '_start_',
+                '_seed_{0}'.format(self._n_seeds),
                 [(link.url, 1.0) for link in seeds]
             )
         )
+        self._n_seeds += 1
 
     def request_error(self, page, error):
         pass
@@ -50,6 +73,10 @@ class Backend(frontera.Backend):
         cp = pagedb.CrawledPage(
             response.url,
             [(link.url, link.meta['score']) for link in links])
+        try:
+            cp.score = response.meta['score']
+        except KeyError:
+            cp.score = 0.0
 
         self._scheduler.add(cp)
 

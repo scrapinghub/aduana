@@ -6,6 +6,7 @@ MAX_REQUESTS = 100000000
 MAX_NEXT_REQUESTS = 10
 DELAY_ON_EMPTY = 0.0
 PAGE_DB_PATH = 'test_crawl'
+SCORER='HitsScorer'
 USE_SCORES = True
 #--------------------------------------------------------
 # Logging

@@ -1,5 +1,9 @@
 http://www.datatau.com/
-http://newsoffice.mit.edu/topic/machine-learning
-http://www.extremetech.com/tag/machine-learning
+http://www.reddit.com/r/MachineLearning/
+http://aitopics.org/topic/machine-learning
+http://en.wikipedia.org/wiki/Machine_learning
 http://ml.cmu.edu/news/index.html
 http://venturebeat.com/tag/machine-learning/
+http://www.extremetech.com/tag/machine-learning
+http://www.datanami.com/
+http://newsoffice.mit.edu/topic/machine-learning
