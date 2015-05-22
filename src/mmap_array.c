@@ -219,7 +219,7 @@ mmap_array_resize(MMapArray *marr, size_t n_elements) {
           goto on_error;
      }
 #if defined(_WIN32) || defined(__APPLE__)
-     if (munmap(marr->mem, 0) != 0)
+     if (munmap(marr->mem, old_size) != 0)
           marr->mem = MAP_FAILED;
      else
           marr->mem = mmap(
