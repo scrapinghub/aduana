@@ -4,7 +4,11 @@
 
 #include <assert.h>
 #include <errno.h>
+#ifdef __APPLE__
+#include <malloc/malloc.h>
+#else
 #include <malloc.h>
+#endif
 #include <math.h>
 #include <pthread.h>
 #include <stdint.h>

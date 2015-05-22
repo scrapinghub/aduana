@@ -6,9 +6,14 @@
 #define _GNU_SOURCE 1
 
 #include <errno.h>
+#ifdef __APPLE__
+#include <malloc/malloc.h>
+#else
 #include <malloc.h>
+#endif
 #include <stdint.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>

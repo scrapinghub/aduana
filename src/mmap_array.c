@@ -2,14 +2,27 @@
 #define _BSD_SOURCE 1
 #define _GNU_SOURCE 1
 
+#if defined(__APPLE__)
+#define S_IREAD S_IRUSR
+#define S_IWRITE S_IWUSR
+#define S_IEXEC S_IXUSR
+
+#define MREMAP_MAYMOVE 1
+#define MAP_ANONYMOUS 0x1000
+#endif
+
 #include <errno.h>
 #include <fcntl.h>
+#ifdef __APPLE__
+#include <malloc/malloc.h>
+#else
 #include <malloc.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef _WIN32
+#if defined(_WIN32) 
 #include "mman.h"
 #else
 #include <sys/mman.h>
@@ -19,6 +32,7 @@
 
 #include "mmap_array.h"
 #include "util.h"
+
 
 static void
 mmap_array_set_error(MMapArray *marr, int code, const char *message) {
@@ -96,7 +110,6 @@ mmap_array_new(MMapArray **marr,
                goto on_error;
           }
      }
-
      p->mem = mmap(
           0, n_elements*element_size, PROT_READ | PROT_WRITE, mmap_flags, p->fd, 0);
      if (p->mem == MAP_FAILED) {
