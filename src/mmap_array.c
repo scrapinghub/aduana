@@ -166,6 +166,9 @@ mmap_array_zero(MMapArray *marr) {
 
 MMapArrayError
 mmap_array_delete(MMapArray *marr) {
+     if (!marr)
+          return 0;
+
      int errno_cp = 0;
      char *error = 0;
      if (munmap(marr->mem, marr->n_elements*marr->element_size) != 0) {
