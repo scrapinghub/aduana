@@ -436,6 +436,7 @@ test_link_stream(CuTest *tc) {
      }
      CuAssertIntEquals(tc, 5, n_links);
      page_db_link_stream_delete(st);
+     page_db_delete(db);
 }
 
 CuSuite *

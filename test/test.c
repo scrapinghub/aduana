@@ -27,21 +27,22 @@ int main(int argc, char **argv) {
           goto on_error;
      }
 
-     CuString *output = CuStringNew();
-     CuSuite *suite = CuSuiteNew();
+#define RUN_SUITE(command) do{\
+     CuString *output = CuStringNew();\
+     CuSuite *suite = command;\
+     CuSuiteRun(suite);\
+     CuSuiteSummary(suite, output);\
+     CuSuiteDetails(suite, output);\
+     CuSuiteDelete(suite);\
+     printf("%s\n", output->buffer);\
+     CuStringDelete(output);\
+} while(0);
 
-     CuSuiteAddSuite(suite, test_page_db_suite(n_pages));
-     CuSuiteAddSuite(suite, test_page_rank_suite());
-     CuSuiteAddSuite(suite, test_hits_suite());
-     CuSuiteAddSuite(suite, test_bf_scheduler_suite(n_pages));
-     CuSuiteAddSuite(suite, test_util_suite());
-     CuSuiteRun(suite);
-
-     CuSuiteSummary(suite, output);
-     CuSuiteDetails(suite, output);
-     printf("%s\n", output->buffer);
-
-     CuStringDelete(output);
+     RUN_SUITE(test_page_db_suite(n_pages));
+     RUN_SUITE(test_page_rank_suite());
+     RUN_SUITE(test_hits_suite());
+     RUN_SUITE(test_bf_scheduler_suite(n_pages));
+     RUN_SUITE(test_util_suite());
 
      return 0;
 

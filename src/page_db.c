@@ -1120,18 +1120,20 @@ page_db_get_scores(PageDB *db, MMapArray **scores) {
           error2 = mdb_strerror(mdb_rc);
           goto on_error;
      }
+     goto exit;
 
-     if (txn)
-          txn_manager_abort(db->txn_manager, txn);
-     free(pscores);
-     return 0;
 on_error:
-     if (txn)
-          txn_manager_abort(db->txn_manager, txn);
-     free(pscores);
      page_db_set_error(db, page_db_error_internal, __func__);
      page_db_add_error(db, error1);
      page_db_add_error(db, error2);
+
+exit:
+     mdb_cursor_close(cur_hash2info);
+     mdb_cursor_close(cur_hash2idx);
+     mdb_cursor_close(cur_info);
+     if (txn)
+          txn_manager_abort(db->txn_manager, txn);
+     free(pscores);
 
      return db->error->code;
 }

@@ -673,6 +673,7 @@ bf_scheduler_delete(BFScheduler *sch) {
 
           remove(sch->path);
      }
+     free(sch->update_thread);
      free(sch->scorer);
      free(sch->path);
      error_delete(sch->error);

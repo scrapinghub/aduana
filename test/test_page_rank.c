@@ -165,6 +165,7 @@ test_page_rank(CuTest *tc) {
                                 st,
                                 page_db_link_stream_next,
                                 page_db_link_stream_reset) == 0);
+
      page_db_link_stream_delete(st);
 
      for (int i=0; i<5; ++i)
@@ -184,6 +185,9 @@ test_page_rank(CuTest *tc) {
               pr->error->message,
               page_rank_delete(pr) == 0);
 
+     CuAssert(tc,
+              pr->error->message,
+              mmap_array_delete(pr->scores) == 0);
      page_db_delete(db);
 }
 
