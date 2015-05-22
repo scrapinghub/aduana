@@ -16,20 +16,23 @@
  * picks the highest score page and removes it from the top of the list.
  *
  * The key is then to assign valid scores to the pages. If no scorer is selected
- * this scheduler will use the score provided when the page is crawled. Additionally
- * an alternative scorer can be set up, see for example @ref page_rank_scorer_setup
- * or @ref hits_scorer_setup.
+ * this scheduler will use the score provided when the page is
+ * crawled. Additionally an alternative scorer can be set up, see for example
+ * @ref page_rank_scorer_setup or @ref hits_scorer_setup.
  * @{
  */
 
 /** Size of the mmap to store the schedule */
 #define BF_SCHEDULER_DEFAULT_SIZE PAGE_DB_DEFAULT_SIZE
 
-/** Updating the schedule involves starting a write transaction. However write
-    transactions coming from multiple threads are serialized. Since adding
-    new pages to the schedule and returning requests also start write transactions
-    it means that the update thread could block this more critical operations.
-    To avoid this we avoid long write transactions and split them in batches. */
+/** Size of the batch used in updating the schedule.
+ *
+ * Updating the schedule involves starting a write transaction. However write
+ * transactions coming from multiple threads are serialized. Since adding new
+ * pages to the schedule and returning requests also start write transactions it
+ * means that the update thread could block this more critical operations. To
+ * avoid this we avoid long write transactions and split them in batches.
+ */
 #define BF_SCHEDULER_UPDATE_BATCH_SIZE 100
 
 /** Default value for BFScheduler::persist */

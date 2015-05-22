@@ -262,7 +262,18 @@ typedef struct {
 } PageDB;
 
 
-/** Hash function used to convert from URL to hash */
+/** Hash function used to convert from URL to hash.
+ *
+ * The hash is a 64 bit number where the first 32 bits are a hash of the domain
+ * and the last 32 bits are a hash of the full URL. In this way all URLs whith
+ * the same domain get grouped together in the database. This has some good
+ * consequences:
+ *
+ * 1. We can access all pages inside a domain by accessing the first of them in
+ *    the database and moving sequentially.
+ * 2. When streaming links this improves locality since pages in the same domain
+ *    tend to have similar links.
+ */
 uint64_t
 page_db_hash(const char *url);
 

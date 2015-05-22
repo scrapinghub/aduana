@@ -29,15 +29,16 @@
  *
  * In the schedule we want to keep an ordered heap of hashes, where we can pop
  * the highest scores whenever we want. In this sense it would have been more
- * natural to use as keys the scores (a single float) and the page hashes as the values.
- * However, the scores may change as the page database changes and we want a
- * fast method to change the score associated to a hash. In particular we want
- * to make the change:
+ * natural to use as keys the scores (a single float) and the page hashes as the
+ * values.  However, the scores may change as the page database changes and we
+ * want a fast method to change the score associated to a hash. In particular we
+ * want to make the change:
  *
  *   (score_old, hash) --> (score_new, hash)
  *
  * Since there can be lots of pages with the same score we move the hash into
- * the key, so that finding the previous (score_old, hash) can be done very fast */
+ * the key, so that finding the previous (score_old, hash) can be done very fast
+ */
 typedef struct {
      float score;
      uint64_t hash;
