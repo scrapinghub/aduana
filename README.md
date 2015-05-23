@@ -20,9 +20,8 @@ could change: from the database used ([LMDB](http://symas.com/mdb/))
 to the implementation language (C).
 
 Also, I only test with regularity under Linux, my development
-platform. From time to time I test also on Windows 8 using
-[MinGW64](http://mingw-w64.yaxm.org/doku.php). Porting to OSX should
-not be difficult but right now I have no time.
+platform. From time to time I test also on OS X and Windows 8 using
+[MinGW64](http://mingw-w64.yaxm.org/doku.php).
 
 
 # Requirements
