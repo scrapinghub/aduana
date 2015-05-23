@@ -1,6 +1,7 @@
 import ctypes as ct
+from ctypes.util import find_library
 
-C_PAGE_DB = ct.cdll.LoadLibrary('libpagedb.so')
+C_PAGE_DB = ct.cdll.LoadLibrary(find_library('pagedb'))
 
 C_PAGE_DB.error_message.argtypes = [ct.c_void_p]
 C_PAGE_DB.error_message.restype = ct.c_char_p
