@@ -8,6 +8,7 @@
 #include "page_rank.h"
 #include "hits.h"
 #include "bf_scheduler.h"
+#include "domain_temp.h"
 
 int main(int argc, char **argv) {
      size_t n_pages = 0;
@@ -43,7 +44,7 @@ int main(int argc, char **argv) {
      RUN_SUITE(test_hits_suite());
      RUN_SUITE(test_bf_scheduler_suite(n_pages));
      RUN_SUITE(test_util_suite());
-
+     RUN_SUITE(test_domain_temp_suite());
      return 0;
 
 on_error:

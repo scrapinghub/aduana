@@ -1,10 +1,10 @@
 cmake_minimum_required(VERSION 2.8.8)
 project(stream-mmap)
 
-set(WARNING_FLAGS 
+set(WARNING_FLAGS
   "-Wall -Wextra -Wundef -Wshadow -Wcast-align -Wstrict-prototypes -Wbad-function-cast -Wuninitialized -pedantic")
 
-set(CMAKE_C_FLAGS 
+set(CMAKE_C_FLAGS
   "-std=c99 -m64 -msse2 -pthread ${WARNING_FLAGS}")
 
 set(CMAKE_C_FLAGS_RELEASE  "${CMAKE_C_FLAGS_RELEASE} -O3")
@@ -45,6 +45,7 @@ set(PAGE_DB_SRC
   src/page_rank_scorer.c
   src/hits_scorer.c
   src/txn_manager.c
+  src/domain_temp.c
 
   $<TARGET_OBJECTS:lmdb>
   $<TARGET_OBJECTS:xxhash>
