@@ -360,9 +360,8 @@ page_rank_end_loop(PageRank *pr, float *delta) {
           for (size_t i=0; i<pr->n_pages; ++i) {
                float *r = mmap_array_idx(pr->scores, i);
                if (r) {
-                    *r /= pr->total_score;
                     float *score = mmap_array_idx(pr->value2, i);
-                    *score += rem*(*r);
+                    *score += rem*(*r)/pr->total_score;
                }
           }
      }
