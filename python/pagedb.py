@@ -150,6 +150,7 @@ class c_PageDB(ct.Structure):
     _fields_ = [
         ("path", ct.c_char_p),
         ("txn_manager", ct.c_void_p),
+        ("domain_temp", ct.c_void_p),
         ("error", ct.c_void_p),
         ("persist", ct.c_int)
     ]
@@ -349,7 +350,9 @@ class c_BFScheduler(ct.Structure):
         ("path", ct.c_char_p),
         ("update_thread", ct.c_void_p),
         ("error", ct.c_void_p),
-        ("persist", ct.c_int)
+        ("persist", ct.c_int),
+        ("max_soft_domain_crawl_rate", ct.c_float),
+        ("max_hard_domain_crawl_rate", ct.c_float)
     ]
 C_PAGE_DB.bf_scheduler_new.argtypes = [
     ct.POINTER(ct.POINTER(c_BFScheduler)), ct.POINTER(c_PageDB)]
@@ -377,6 +380,11 @@ C_PAGE_DB.bf_scheduler_update_stop.restype = ct.c_int
 
 C_PAGE_DB.bf_scheduler_set_persist.argtypes = [ct.POINTER(c_BFScheduler), ct.c_int]
 C_PAGE_DB.bf_scheduler_set_persist.restype = None
+
+C_PAGE_DB.bf_scheduler_set_max_domain_crawl_rate.argtypes = [
+    ct.POINTER(c_BFScheduler), ct.c_float, ct.c_float
+]
+C_PAGE_DB.bf_scheduler_set_max_domain_crawl_rate.restype = ct.c_int
 
 class BFScheduler(object):
     def __init__(self, page_db, persist=0, scorer=None):
@@ -429,6 +437,8 @@ class BFScheduler(object):
         self._c_page_db.page_request_delete(pReq)
         return reqs
 
+    def set_crawl_rate(self, soft_rate, hard_rate):
+        self._c_page_db.bf_scheduler_set_max_domain_crawl_rate(self._pBF, soft_rate, hard_rate)
 
 if __name__ == '__main__':
     db = PageDB('./test_python_bindings')

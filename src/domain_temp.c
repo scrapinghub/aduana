@@ -23,6 +23,9 @@ domain_temp_new(size_t length, float window) {
 void
 domain_temp_update(DomainTemp *dh, float t) {
      float k = 1.0 - (t - dh->time)/dh->window;
+     if (k < 0)
+          k = 0.0;
+
      for (size_t i=0; i<dh->length; ++i)
           dh->table[i].temp *= k;
      dh->time = t;
@@ -41,7 +44,7 @@ domain_temp_heat(DomainTemp *dh, uint32_t hash) {
                temp_min = dh->table[i].temp;
                i_min = i;
           }
-     if (!found) {
+     if (!found && temp_min < 1.0) {
           dh->table[i_min].hash = hash;
           dh->table[i_min].temp = 1.0;
      }
@@ -58,8 +61,10 @@ domain_temp_get(DomainTemp *dh, uint32_t hash) {
 
 void
 domain_temp_delete(DomainTemp *dh) {
-     free(dh->table);
-     free(dh);
+     if (dh) {
+          free(dh->table);
+          free(dh);
+     }
 }
 
 #if (defined TEST) && TEST

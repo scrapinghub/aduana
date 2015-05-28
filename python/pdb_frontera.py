@@ -28,6 +28,8 @@ class Backend(frontera.Backend):
             scorer=self._scorer,
             persist=persist
         )
+        self._scheduler.set_crawl_rate(0.5, 100.0)
+
         self._n_seeds = 0
 
     @classmethod

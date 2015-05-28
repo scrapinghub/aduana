@@ -120,6 +120,10 @@ typedef struct {
 // -----------------------------------------------------------------------------
      /** If true, do not delete files after deleting object*/
      int persist;
+     /** Maximum crawls per second per domain */
+     float max_soft_domain_crawl_rate;
+     /** Maximum crawls per second per domain */
+     float max_hard_domain_crawl_rate;
 } BFScheduler;
 
 
@@ -182,6 +186,13 @@ bf_scheduler_update_stop(BFScheduler *sch);
 /** Set persist option for scheduler */
 void
 bf_scheduler_set_persist(BFScheduler *sch, int value);
+
+/** Set @ref BFScheduler::max_soft_domain_crawl_rate and
+ * @ref BFScheduler::max_hard_domain_crawl_rate*/
+BFSchedulerError
+bf_scheduler_set_max_domain_crawl_rate(BFScheduler *sch,
+                                       float max_soft_crawl_rate,
+                                       float max_hard_crawl_rate);
 
 /// @}
 

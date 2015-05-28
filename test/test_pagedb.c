@@ -200,7 +200,8 @@ test_page_db_crawl(CuTest *tc) {
      CuAssert(tc,
               db!=0? db->error->message: "NULL",
               ret == 0);
-     db->persist = 0;
+     page_db_set_persist(db, 0);
+     page_db_set_domain_temp(db, 20, 60.0);
 
      const size_t n_links = 10;
 

@@ -21,6 +21,7 @@
 #include "lmdb.h"
 #include "xxhash.h"
 
+#include "domain_temp.h"
 #include "hits.h"
 #include "link_stream.h"
 #include "page_rank.h"
@@ -258,6 +259,9 @@ typedef struct {
          database resize */
      TxnManager* txn_manager;
 
+     /** Track the most crawled domains */
+     DomainTemp *domain_temp;
+
      Error *error;
 
 // Options
@@ -282,6 +286,13 @@ typedef struct {
 uint64_t
 page_db_hash(const char *url);
 
+/** Extract the domain hash from the full hash */
+uint32_t
+page_db_hash_get_domain(uint64_t hash);
+
+/** Extract the URL hash from the full hash */
+uint32_t
+page_db_hash_get_url(uint64_t hash);
 
 /** Creates a new database and stores data inside path
  *
@@ -343,6 +354,10 @@ page_db_get_idx(PageDB *db, uint64_t hash, uint64_t *idx);
 PageDBError
 page_db_get_scores(PageDB *db, MMapArray **scores);
 
+/** Get crawl rate for the given domain */
+float
+page_db_get_domain_crawl_rate(PageDB *db, uint32_t domain_hash);
+
 /** Close database, delete files if it should not be persisted, and free memory */
 PageDBError
 page_db_delete(PageDB *db);
@@ -350,6 +365,10 @@ page_db_delete(PageDB *db);
 /** Set persist option for database */
 void
 page_db_set_persist(PageDB *db, int value);
+
+/** Set domain temperature tracking options */
+PageDBError
+page_db_set_domain_temp(PageDB *db, size_t n_domains, float window);
 
 /** Dump database to file in human readable format */
 PageDBError

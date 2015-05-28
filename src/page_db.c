@@ -482,6 +482,18 @@ page_db_hash(const char *url) {
      return hash_full;
 }
 
+uint32_t
+page_db_hash_get_domain(uint64_t hash) {
+     uint32_t *hash_part = (uint32_t*)&hash;
+     return hash_part[1];
+}
+
+uint32_t
+page_db_hash_get_url(uint64_t hash) {
+     uint32_t *hash_part = (uint32_t*)&hash;
+     return hash_part[0];
+}
+
 static int
 page_db_open_cursor(MDB_txn *txn,
                     const char *db_name,
@@ -558,6 +570,7 @@ page_db_new(PageDB **db, const char *path) {
           return page_db_error_memory;
      }
      p->persist = PAGE_DB_DEFAULT_PERSIST;
+     p->domain_temp = 0;
 
      // create directory if not present yet
      const char *error = make_dir(path);
@@ -793,6 +806,11 @@ page_db_add(PageDB *db, const CrawledPage *page, PageInfoList **page_info_list) 
      uint64_t hash = page_db_hash(page->url);
      key.mv_size = sizeof(uint64_t);
      key.mv_data = &hash;
+
+     if (db->domain_temp) {
+          domain_temp_update(db->domain_temp, (float)page->time);
+          domain_temp_heat(db->domain_temp, page_db_hash_get_domain(hash));
+     }
 
      PageInfo *pi;
      if (page_db_add_crawled_page_info(cur_hash2info, &key, page, &pi, &mdb_rc) != 0) {
@@ -1142,6 +1160,13 @@ exit:
      return db->error->code;
 }
 
+float
+page_db_get_domain_crawl_rate(PageDB *db, uint32_t domain_hash) {
+     if (db->domain_temp)
+          return domain_temp_get(db->domain_temp, domain_hash);
+     else
+          return 0.0;
+}
 
 /** Close database */
 PageDBError
@@ -1170,6 +1195,7 @@ page_db_delete(PageDB *db) {
           free(lock);
      }
      free(db->path);
+     domain_temp_delete(db->domain_temp);
      error_delete(db->error);
      free(db);
      return 0;
@@ -1267,10 +1293,22 @@ page_db_links_dump(PageDB *db, FILE *output) {
      return 0;
 }
 
-/** Set persist option for database */
 void
 page_db_set_persist(PageDB *db, int value) {
      db->persist = value;
+}
+
+PageDBError
+page_db_set_domain_temp(PageDB *db, size_t n_domains, float window) {
+     if (db->domain_temp)
+          domain_temp_delete(db->domain_temp);
+
+     if ((db->domain_temp = domain_temp_new(n_domains, window)) == 0) {
+          page_db_set_error(db, page_db_error_internal, __func__);
+          page_db_add_error(db, "could not allocate new DomainTemp struct");
+          return db->error->code;
+     }
+     return 0;
 }
 /// @}
 

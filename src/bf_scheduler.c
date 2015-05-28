@@ -112,6 +112,8 @@ bf_scheduler_new(BFScheduler **sch, PageDB *db) {
 
      p->page_db = db;
      p->persist = BF_SCHEDULER_DEFAULT_PERSIST;
+     p->max_soft_domain_crawl_rate = -1.0;
+     p->max_hard_domain_crawl_rate = -1.0;
 
      if (!(p->path = concat(db->path, "bfs", '_')))
           error = "building scheduler path";
@@ -563,6 +565,81 @@ bf_scheduler_update_stop(BFScheduler *sch) {
           }
      return sch->error->code;
 }
+static BFSchedulerError
+bf_scheduler_add_requests(BFScheduler *sch,
+                          MDB_cursor *cur,
+                          PageRequest *req,
+                          size_t max_request,
+                          float crawl_limit) {
+
+     char *error1 = 0;
+     char *error2 = 0;
+
+
+     MDB_cursor_op cur_op = MDB_FIRST;
+     while (req->n_urls < max_request) {
+          int mdb_rc;
+          MDB_val key;
+          MDB_val val;
+          ScheduleKey *se;
+          PageInfo *pi;
+
+          switch (mdb_rc = mdb_cursor_get(cur, &key, &val, cur_op)) {
+          case 0:
+               se = key.mv_data;
+               if (page_db_get_info(sch->page_db, se->hash, &pi) != 0) {
+                    error1 = "retrieving PageInfo from PageDB";
+                    error2 = sch->page_db->error->message;
+                    goto on_error;
+               }
+               break;
+
+          case MDB_NOTFOUND: // no more pages left
+               return 0;
+          default:
+               error1 = "getting head of schedule";
+               error2 = mdb_strerror(mdb_rc);
+               goto on_error;
+          }
+          int delete = 0;
+          if (pi) {
+               if (pi->n_crawls == 0) {
+                   if ((crawl_limit < 0) ||
+                       page_db_get_domain_crawl_rate(
+                            sch->page_db,
+                            page_db_hash_get_domain(se->hash)) <= crawl_limit) {
+
+                        // if requested --> delete
+                        delete = 1;
+                        if (page_request_add_url(req, pi->url) != 0) {
+                             error1 = "adding url to request";
+                             goto on_error;
+                        }
+                   }
+               } else { // if already crawled --> delete
+                    delete = 1;
+               }
+               page_info_delete(pi);
+          }
+          if (delete) {
+               if ((mdb_rc = mdb_cursor_del(cur, 0)) != 0) {
+                    error1 = "deleting head of schedule";
+                    error2 = mdb_strerror(mdb_rc);
+                    goto on_error;
+               }
+               cur_op = MDB_FIRST;
+          } else {
+               cur_op = MDB_NEXT;
+          }
+     }
+     return 0;
+on_error:
+     bf_scheduler_set_error(sch, bf_scheduler_error_internal, __func__);
+     bf_scheduler_add_error(sch, error1);
+     bf_scheduler_add_error(sch, error2);
+
+     return sch->error->code;
+}
 
 BFSchedulerError
 bf_scheduler_request(BFScheduler *sch, size_t n_pages, PageRequest **request) {
@@ -591,50 +668,14 @@ bf_scheduler_request(BFScheduler *sch, size_t n_pages, PageRequest **request) {
           goto on_error;
      }
 
-     while (req->n_urls < n_pages) {
-          MDB_val key;
-          MDB_val val;
-          PageInfo *pi;
-          ScheduleKey *se;
+     if (bf_scheduler_add_requests(
+              sch, cur, req, n_pages, sch->max_soft_domain_crawl_rate) != 0)
+          return sch->error->code;
+     if ((req->n_urls < n_pages) &&
+         bf_scheduler_add_requests(
+              sch, cur, req, n_pages, sch->max_hard_domain_crawl_rate) != 0)
+          return sch->error->code;
 
-          switch (mdb_rc = mdb_cursor_get(cur, &key, &val, MDB_FIRST)) {
-          case 0:
-               se = key.mv_data;
-               switch (page_db_get_info(sch->page_db, se->hash, &pi)) {
-               case 0:
-                    if (pi) {
-                         if (pi->n_crawls == 0)
-                              if (page_request_add_url(req, pi->url) != 0) {
-                                   error1 = "adding url to request";
-                                   goto on_error;
-                              }
-                         page_info_delete(pi);
-                    } else {
-                         // TODO
-                    }
-                    break;
-               default:
-                    error1 = "retrieving PageInfo from PageDB";
-                    error2 = sch->page_db->error->message;
-                    goto on_error;
-               }
-               break;
-
-          case MDB_NOTFOUND: // no more pages left
-               goto all_pages_retrieved;
-          default:
-               error1 = "getting head of schedule";
-               error2 = mdb_strerror(mdb_rc);
-               goto on_error;
-          }
-          if ((mdb_rc = mdb_cursor_del(cur, 0)) != 0) {
-               error1 = "deleting head of schedule";
-               error2 = mdb_strerror(mdb_rc);
-               goto on_error;
-          }
-     }
-
-all_pages_retrieved:
      if (txn_manager_commit(sch->txn_manager, txn) != 0) {
           error1 = "commiting schedule transaction";
           error2 = sch->txn_manager->error->message;
@@ -653,6 +694,34 @@ on_error:
 void
 bf_scheduler_set_persist(BFScheduler *sch, int value) {
      sch->persist = value;
+}
+
+BFSchedulerError
+bf_scheduler_set_max_domain_crawl_rate(BFScheduler *sch,
+                                       float max_soft_crawl_rate,
+                                       float max_hard_crawl_rate) {
+     // The window T must be a period of time long enough for the crawl rate of a
+     // domain to be stable. Let's say at least 10 measures are expected inside
+     // this time window
+     float window = 10.0/max_hard_crawl_rate;
+
+     /* If W is the window size, then the minimum number of domains we need
+        if we want to track domains at a rate R is W/R. Let's assume
+        we want to track at least 0.1*max_domain_temp then the number N of domains
+        is:
+
+         W / R * 10 = N
+     */
+     size_t n_domains = 100;
+     if (page_db_set_domain_temp(sch->page_db, n_domains, window) != 0) {
+          bf_scheduler_set_error(sch, bf_scheduler_error_internal, __func__);
+          bf_scheduler_add_error(sch, sch->page_db->error->message);
+          return sch->error->code;
+     }
+     sch->max_soft_domain_crawl_rate = max_soft_crawl_rate;
+     sch->max_hard_domain_crawl_rate = max_hard_crawl_rate;
+
+     return 0;
 }
 
 void
