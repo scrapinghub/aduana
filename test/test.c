@@ -28,6 +28,7 @@ int main(int argc, char **argv) {
           goto on_error;
      }
 
+     int fail_count = 0;
 #define RUN_SUITE(command) do{\
      CuString *output = CuStringNew();\
      CuSuite *suite = command;\
@@ -37,6 +38,7 @@ int main(int argc, char **argv) {
      CuSuiteDelete(suite);\
      printf("%s\n", output->buffer);\
      CuStringDelete(output);\
+     fail_count += suite->failCount;\
 } while(0);
 
      RUN_SUITE(test_page_db_suite(n_pages));
@@ -45,7 +47,10 @@ int main(int argc, char **argv) {
      RUN_SUITE(test_bf_scheduler_suite(n_pages));
      RUN_SUITE(test_util_suite());
      RUN_SUITE(test_domain_temp_suite());
-     return 0;
+     if (fail_count == 0)
+          return 0;
+     else
+          return -1;
 
 on_error:
      fprintf(stderr, "\n");
