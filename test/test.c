@@ -29,24 +29,26 @@ int main(int argc, char **argv) {
      }
 
      int fail_count = 0;
-#define RUN_SUITE(command) do{\
-     CuString *output = CuStringNew();\
-     CuSuite *suite = command;\
-     CuSuiteRun(suite);\
-     CuSuiteSummary(suite, output);\
-     CuSuiteDetails(suite, output);\
-     CuSuiteDelete(suite);\
-     printf("%s\n", output->buffer);\
-     CuStringDelete(output);\
-     fail_count += suite->failCount;\
-} while(0);
+#define RUN_SUITE(name, command) do{\
+          printf("SUITE: %s\n", name);\
+          printf("----------------------------------------------------\n");\
+          CuString *output = CuStringNew();     \
+          CuSuite *suite = command;             \
+          CuSuiteRun(suite);                    \
+          CuSuiteSummary(suite, output);        \
+          CuSuiteDetails(suite, output);        \
+          CuSuiteDelete(suite);                 \
+          printf("%s\n", output->buffer);       \
+          CuStringDelete(output);               \
+          fail_count += suite->failCount;       \
+     } while(0);
 
-     RUN_SUITE(test_page_db_suite(n_pages));
-     RUN_SUITE(test_page_rank_suite());
-     RUN_SUITE(test_hits_suite());
-     RUN_SUITE(test_bf_scheduler_suite(n_pages));
-     RUN_SUITE(test_util_suite());
-     RUN_SUITE(test_domain_temp_suite());
+     RUN_SUITE("page_db", test_page_db_suite(n_pages));
+     RUN_SUITE("page_rank", test_page_rank_suite());
+     RUN_SUITE("hits", test_hits_suite());
+     RUN_SUITE("bf_scheduler", test_bf_scheduler_suite(n_pages));
+     RUN_SUITE("util", test_util_suite());
+     RUN_SUITE("domain_temp", test_domain_temp_suite());
      if (fail_count == 0)
           return 0;
      else
