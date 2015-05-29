@@ -168,8 +168,9 @@ test_page_rank(CuTest *tc) {
 
      page_db_link_stream_delete(st);
 
+     float total_score = 0.0;
      for (int i=0; i<5; ++i)
-          scores[i] = *((float*)mmap_array_idx(pr->scores, i));
+          total_score += scores[i] = *((float*)mmap_array_idx(pr->scores, i));
 
      for (int i=0; i<5; ++i) {
           CuAssert(tc,
@@ -179,7 +180,7 @@ test_page_rank(CuTest *tc) {
           CuAssertPtrNotNull(tc,
                              score = mmap_array_idx(pr->value1, idx));
 
-          CuAssertDblEquals(tc, scores[i], *score, 1e-6);
+          CuAssertDblEquals(tc, scores[idx]/total_score, *score, 1e-6);
      }
      CuAssert(tc,
               pr->error->message,
