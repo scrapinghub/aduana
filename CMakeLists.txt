@@ -72,8 +72,10 @@ target_link_libraries(pagedb pthread m)
 
 add_executable(page_db_dump src/page_db_dump.c)
 target_link_libraries(page_db_dump pagedb)
+add_executable(page_db_find src/page_db_find.c)
+target_link_libraries(page_db_find pagedb)
 
 # Installation
 #############################################################
 install(TARGETS pagedb DESTINATION lib)
-install(TARGETS page_db_dump DESTINATION bin)
+install(TARGETS page_db_dump page_db_find DESTINATION bin)
