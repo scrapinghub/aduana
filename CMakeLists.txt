@@ -74,8 +74,10 @@ add_executable(page_db_dump src/page_db_dump.c)
 target_link_libraries(page_db_dump pagedb)
 add_executable(page_db_find src/page_db_find.c)
 target_link_libraries(page_db_find pagedb)
+add_executable(page_db_links src/page_db_links.c)
+target_link_libraries(page_db_links pagedb)
 
 # Installation
 #############################################################
 install(TARGETS pagedb DESTINATION lib)
-install(TARGETS page_db_dump page_db_find DESTINATION bin)
+install(TARGETS page_db_dump page_db_find page_db_links DESTINATION bin)
