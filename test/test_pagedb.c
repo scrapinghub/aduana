@@ -276,7 +276,7 @@ test_page_db_crawl(CuTest *tc) {
 
 void
 test_hashidx_stream(CuTest *tc) {
-     char test_dir[] = "test-bfs-XXXXXX";
+     char test_dir[] = "test-pagedb-XXXXXX";
      mkdtemp(test_dir);
 
      PageDB *db;
@@ -334,6 +334,75 @@ test_hashidx_stream(CuTest *tc) {
                    hash == expected_hash[idx]);
      }
      hashidx_stream_delete(stream);
+
+     page_db_delete(db);
+}
+
+void
+test_hashinfo_stream(CuTest *tc) {
+     char test_dir[] = "test-pagedb-XXXXXX";
+     mkdtemp(test_dir);
+
+     PageDB *db;
+     int ret = page_db_new(&db, test_dir);
+     CuAssert(tc,
+              db!=0? db->error->message: "NULL",
+              ret == 0);
+     db->persist = 0;
+
+     CrawledPage *cp = crawled_page_new("1");
+     crawled_page_add_link(cp, "a", 0);
+     crawled_page_add_link(cp, "b", 0);
+     CuAssert(tc,
+              db->error->message,
+              page_db_add(db, cp, 0) == 0);
+     crawled_page_delete(cp);
+
+     cp = crawled_page_new("2");
+     crawled_page_add_link(cp, "c", 0);
+     crawled_page_add_link(cp, "d", 0);
+     CuAssert(tc,
+              db->error->message,
+              page_db_add(db, cp, 0) == 0);
+     crawled_page_delete(cp);
+
+     HashInfoStream *stream;
+     CuAssert(tc,
+              db->error->message,
+              hashinfo_stream_new(&stream, db) == 0);
+
+     CuAssert(tc,
+              "stream was not initialized",
+              stream->state == stream_state_init);
+
+     uint64_t hash;
+     PageInfo *pi;
+
+     char *expected_url[] = {"1", "a", "b", "2", "c", "d"};
+     uint64_t expected_hash[6];
+     for (int i=0; i<6; ++i)
+          expected_hash[i] = page_db_hash(expected_url[i]);
+     int found[] = {0, 0, 0, 0, 0, 0};
+     for (int i=0; i<6; ++i) {
+          CuAssert(tc,
+                   "stream element expected",
+                   hashinfo_stream_next(stream, &hash, &pi) == stream_state_next);
+          int match = 0;
+          for (int j=0; j<6; ++j)
+               if (hash == expected_hash[j]) {
+                    found[j] = 1;
+                    CuAssertStrEquals(tc,
+                                      expected_url[j],
+                                      pi->url);
+                    match = 1;
+               }
+          CuAssert(tc, "unexpected page hash", match);
+          page_info_delete(pi);
+     }
+     hashinfo_stream_delete(stream);
+
+     for (int i=0; i<6; ++i)
+          CuAssertTrue(tc, found[i]);
 
      page_db_delete(db);
 }
@@ -451,6 +520,7 @@ test_page_db_suite(size_t n_pages) {
      SUITE_ADD_TEST(suite, test_page_db_simple);
      SUITE_ADD_TEST(suite, test_page_db_crawl);
      SUITE_ADD_TEST(suite, test_hashidx_stream);
+     SUITE_ADD_TEST(suite, test_hashinfo_stream);
      SUITE_ADD_TEST(suite, test_link_stream);
 
      return suite;

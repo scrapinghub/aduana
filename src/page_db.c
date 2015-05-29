@@ -1312,7 +1312,73 @@ page_db_set_domain_temp(PageDB *db, size_t n_domains, float window) {
 }
 /// @}
 
+/// @addtogroup HashInfoStream
+/// @{
+PageDBError
+hashinfo_stream_new(HashInfoStream **st, PageDB *db) {
+     HashInfoStream *p = *st = calloc(1, sizeof(*p));
+     if (p == 0)
+          return page_db_error_memory;
 
+     p->db = db;
+
+     MDB_txn *txn;
+     int mdb_rc = 0;
+     char *error = 0;
+
+     // start a new read transaction
+     if (txn_manager_begin(db->txn_manager, MDB_RDONLY, &txn) != 0) {
+          error = db->txn_manager->error->message;
+          goto mdb_error;
+     }
+     // open cursor to links database
+     if ((mdb_rc = page_db_open_hash2info(txn, &p->cur)) != 0) {
+          error = "opening hash2info cursor";
+          goto mdb_error;
+     }
+
+     p->state = stream_state_init;
+
+     return 0;
+
+mdb_error:
+     p->state = stream_state_error;
+
+     page_db_set_error(db, page_db_error_internal, __func__);
+     page_db_add_error(db, error);
+     if (mdb_rc != 0)
+          page_db_add_error(db, mdb_strerror(mdb_rc));
+
+     return db->error->code;
+}
+
+StreamState
+hashinfo_stream_next(HashInfoStream *st, uint64_t *hash, PageInfo **pi) {
+     MDB_val key;
+     MDB_val val;
+     switch (mdb_cursor_get(st->cur,
+                            &key,
+                            &val,
+                            st->state == stream_state_init? MDB_FIRST: MDB_NEXT)) {
+     case 0:
+          *hash = *(uint64_t*)key.mv_data;
+          *pi = page_info_load(&val);
+          return st->state = stream_state_next;
+     case MDB_NOTFOUND:
+          return st->state = stream_state_end;
+     default:
+          return st->state = stream_state_error;
+     }
+}
+
+void
+hashinfo_stream_delete(HashInfoStream *st) {
+     MDB_txn *txn = mdb_cursor_txn(st->cur);
+     mdb_cursor_close(st->cur);
+     txn_manager_abort(st->db->txn_manager, txn);
+     free(st);
+}
+/// @}
 /// @addtogroup PageDBLinkStream
 /// @{
 

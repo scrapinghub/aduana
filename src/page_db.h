@@ -428,6 +428,30 @@ page_db_link_stream_delete(PageDBLinkStream *es);
 
 /// @}
 
+/// @addtogroup HashInfoStream
+/// @{
+
+/** Stream over HashInfo inside PageDB */
+typedef struct {
+     PageDB *db;
+     MDB_cursor *cur;   /**< Cursor to info database */
+     StreamState state;
+} HashInfoStream;
+
+/** Create a new stream */
+PageDBError
+hashinfo_stream_new(HashInfoStream **st, PageDB *db);
+
+/** Get next element in stream */
+StreamState
+hashinfo_stream_next(HashInfoStream *st, uint64_t *hash, PageInfo **pi);
+
+/** Free stream */
+void
+hashinfo_stream_delete(HashInfoStream *st);
+
+/// @}
+
 /// @addtogroup HashIdxStream
 /// @{
 
