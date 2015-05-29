@@ -668,13 +668,29 @@ bf_scheduler_request(BFScheduler *sch, size_t n_pages, PageRequest **request) {
           goto on_error;
      }
 
-     if (bf_scheduler_add_requests(
-              sch, cur, req, n_pages, sch->max_soft_domain_crawl_rate) != 0)
+#define ADD_REQS(limit) bf_scheduler_add_requests(sch, cur, req, n_pages, limit)
+     if (ADD_REQS(sch->max_soft_domain_crawl_rate) != 0)
           return sch->error->code;
-     if ((req->n_urls < n_pages) &&
-         bf_scheduler_add_requests(
-              sch, cur, req, n_pages, sch->max_hard_domain_crawl_rate) != 0)
-          return sch->error->code;
+     if (req->n_urls < n_pages) {
+          // If a hard limit has been defined try to increment crawl rate until
+          // getting all the required URLs or hitting the hard limit
+          if (sch->max_hard_domain_crawl_rate >
+              sch->max_soft_domain_crawl_rate) {
+               const float k =
+                    log(sch->max_hard_domain_crawl_rate/sch->max_soft_domain_crawl_rate)/
+                    (BF_SCHEDULER_CRAWL_RATE_STEPS - 1.0);
+               for (int step = 1;
+                    (step < BF_SCHEDULER_CRAWL_RATE_STEPS) &&
+                         (req->n_urls < n_pages);
+                    ++step) {
+                    if (ADD_REQS(sch->max_soft_domain_crawl_rate*exp(k*step)) != 0)
+                         return sch->error->code;
+               }
+          // otherwise just fill the requests
+          } else if (ADD_REQS(sch->max_hard_domain_crawl_rate) != 0) {
+               return sch->error->code;
+          }
+     }
 
      if (txn_manager_commit(sch->txn_manager, txn) != 0) {
           error1 = "commiting schedule transaction";

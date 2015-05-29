@@ -38,6 +38,9 @@
 /** Default value for BFScheduler::persist */
 #define BF_SCHEDULER_DEFAULT_PERSIST 1
 
+/** Number of steps to take between soft and hard crawl rate limit */
+#define BF_SCHEDULER_CRAWL_RATE_STEPS 5
+
 typedef enum {
      bf_scheduler_error_ok = 0,       /**< No error */
      bf_scheduler_error_memory,       /**< Error allocating memory */
