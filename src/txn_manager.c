@@ -133,12 +133,16 @@ txn_manager_begin(TxnManager *tm, int flags, MDB_txn **txn) {
           return tm->error->code;
      }
      int mdb_rc = mdb_txn_begin(tm->env, 0, flags, txn);
+     // other process has changed database size. Try to adapt to new size
+     if (mdb_rc == MDB_MAP_RESIZED)
+          mdb_rc =
+               mdb_env_set_mapsize(tm->env, 0) ||
+               mdb_txn_begin(tm->env, 0, flags, txn);
+
      if (mdb_rc != 0) {
           error_set(tm->error, txn_manager_error_mdb, __func__);
           error_add(tm->error, "beginning new transaction");
           error_add(tm->error, mdb_strerror(mdb_rc));
-
-          txn_manager_abort(tm, *txn);
      }
      return tm->error->code;
 }
