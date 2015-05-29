@@ -140,7 +140,7 @@ test_page_rank(CuTest *tc) {
               pr->error->message,
               page_rank_delete(pr) == 0);
 
-     // With content scores
+     // With content scores, damping = 0
      // ------------------------------------------------------------------------
      CuAssert(tc,
               db->error->message,
@@ -189,6 +189,61 @@ test_page_rank(CuTest *tc) {
      CuAssert(tc,
               pr->error->message,
               mmap_array_delete(pr->scores) == 0);
+
+     // With content scores, damping = 0.5
+     // ------------------------------------------------------------------------
+     CuAssert(tc,
+              db->error->message,
+              page_db_link_stream_new(&st, db) == 0);
+     st->only_diff_domain = 0;
+
+     ret = page_rank_new(&pr, test_dir, 5);
+     CuAssert(tc,
+              pr!=0? pr->error->message: "NULL",
+              ret == 0);
+
+     pr->precision = 1e-6;
+     pr->damping = 0.5;
+
+     CuAssert(tc,
+              db->error->message,
+              page_db_get_scores(db, &pr->scores) == 0);
+
+     CuAssert(tc,
+              pr->error->message,
+              page_rank_compute(pr,
+                                st,
+                                page_db_link_stream_next,
+                                page_db_link_stream_reset) == 0);
+
+     page_db_link_stream_delete(st);
+
+     float expected_pr[] = {
+          0.06386554621848739,
+          0.08739495798319329,
+          0.1647058823529412,
+          0.25546218487394956,
+          0.4285714285714286
+     };
+
+     for (int i=0; i<5; ++i) {
+          CuAssert(tc,
+                   db->error->message,
+                   page_db_get_idx(db, page_db_hash(urls[i]), &idx) == 0);
+
+          CuAssertPtrNotNull(tc,
+                             score = mmap_array_idx(pr->value1, idx));
+
+          CuAssertDblEquals(tc, expected_pr[i], *score, 1e-6);
+     }
+     CuAssert(tc,
+              pr->error->message,
+              page_rank_delete(pr) == 0);
+
+     CuAssert(tc,
+              pr->error->message,
+              mmap_array_delete(pr->scores) == 0);
+
      page_db_delete(db);
 }
 
