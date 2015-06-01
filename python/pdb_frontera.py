@@ -4,7 +4,13 @@ import tempfile
 import pagedb
 
 class Backend(frontera.Backend):
-    def __init__(self, db=None, scorer_class=pagedb.PageRankScorer, use_scores=False):
+    def __init__(self,
+                 db=None,
+                 scorer_class=pagedb.HitsScorer,
+                 use_scores=False,
+                 soft_crawl_limit=0.25,
+                 hard_crawl_limit=100,
+                 **kwargs):
         if db:
             db_path = db
             persist = 1
@@ -20,15 +26,15 @@ class Backend(frontera.Backend):
             self._scorer = scorer_class(self._page_db)
             if use_scores:
                 if scorer_class == pagedb.PageRankScorer:
-                    self._scorer.damping = 0.5
-                self._scorer.use_content_scores = 1
+                    self._scorer.damping = kwargs.get('page_rank_damping', 0.85)
+                self._scorer.use_content_scores = use_scores
 
         self._scheduler = pagedb.BFScheduler(
             self._page_db,
             scorer=self._scorer,
             persist=persist
         )
-        self._scheduler.set_crawl_rate(0.5, 100.0)
+        self._scheduler.set_crawl_rate(soft_crawl_limit, hard_crawl_limit)
 
         self._n_seeds = 0
 
@@ -50,7 +56,10 @@ class Backend(frontera.Backend):
         return cls(
             db=manager.settings.get('PAGE_DB_PATH', None),
             use_scores=manager.settings.get('USE_SCORES', False),
-            scorer_class=scorer_class
+            scorer_class=scorer_class,
+            soft_crawl_limit=manager.settings.get('SOFT_CRAWL_LIMIT', 0.25),
+            hard_crawl_limit=manager.settings.get('SOFT_CRAWL_LIMIT', 100.0),
+            page_rank_damping=manager.settings.get('PAGE_RANK_DAMPING', 0.85)
         )
 
     def frontier_start(self):
@@ -74,7 +83,7 @@ class Backend(frontera.Backend):
     def page_crawled(self, response, links):
         cp = pagedb.CrawledPage(
             response.url,
-            [(link.url, link.meta['score']) for link in links])
+            [(link.url, link.meta['scrapy_meta']['score']) for link in links])
         try:
             cp.score = response.meta['score']
         except KeyError:
