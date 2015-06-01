@@ -141,7 +141,9 @@ crawled_page_get_link(const CrawledPage *cp, size_t i);
  * no public constructors/destructors available.
  */
 typedef struct {
-     char *url;                   /**< A copy of either @ref CrawledPage::url or @ref CrawledPage::links[i] */
+     char *url;                   /**< A copy of either @ref CrawledPage::url or
+                                   * @ref CrawledPage::links[i] */
+     uint64_t linked_from;        /**< The page that first linked this one */
      double first_crawl;          /**< First time this page was crawled */
      double last_crawl;           /**< Last time this page was crawled */
      size_t n_changes;            /**< Number of content changes detected between first and last crawl */

@@ -194,7 +194,7 @@ page_info_print(const PageInfo *pi, char *out) {
  * @return A pointer to the new structure or NULL if failure
  */
 static PageInfo *
-page_info_new_link(const char *url, float score) {
+page_info_new_link(const char *url, uint64_t linked_from, float score) {
      PageInfo *pi = calloc(1, sizeof(*pi));
      if (!pi)
           return 0;
@@ -205,6 +205,7 @@ page_info_new_link(const char *url, float score) {
      }
 
      pi->score = score;
+     pi->linked_from = linked_from;
      return pi;
 }
 
@@ -214,7 +215,7 @@ page_info_new_link(const char *url, float score) {
  */
 static PageInfo *
 page_info_new_crawled(const CrawledPage *cp) {
-     PageInfo *pi = page_info_new_link(cp->url, cp->score);
+     PageInfo *pi = page_info_new_link(cp->url, 0, cp->score);
      if (!pi)
           return 0;
 
@@ -299,7 +300,7 @@ page_info_dump(const PageInfo *pi, MDB_val *val) {
 
      // necessary size except for the URL, which we don't know yet how much is going
      // to cost storing
-     val->mv_size = sizeof(pi->score) + sizeof(pi->n_crawls);
+     val->mv_size = sizeof(pi->linked_from) + sizeof(pi->score) + sizeof(pi->n_crawls);
      if (pi->n_crawls > 0) {
           val->mv_size += sizeof(pi->first_crawl) +
                pi->content_hash_length + sizeof(pi->content_hash_length);
@@ -325,6 +326,7 @@ page_info_dump(const PageInfo *pi, MDB_val *val) {
      char * s;
 #define PAGE_INFO_WRITE(x) for (j=0, s=(char*)&(x); j<sizeof(x); data[i++] = s[j++])
      PAGE_INFO_WRITE(pi->score);
+     PAGE_INFO_WRITE(pi->linked_from);
      PAGE_INFO_WRITE(pi->n_crawls);
      if (pi->n_crawls > 0) {
           PAGE_INFO_WRITE(pi->first_crawl);
@@ -383,6 +385,7 @@ page_info_load(const MDB_val *val) {
      i += curl_size;
 
      PAGE_INFO_READ(pi->score);
+     PAGE_INFO_READ(pi->linked_from);
      PAGE_INFO_READ(pi->n_crawls);
      if (pi->n_crawls > 0) {
           PAGE_INFO_READ(pi->first_crawl);
@@ -729,13 +732,14 @@ on_error:
 static int
 page_db_add_link_page_info(MDB_cursor *cur,
                            MDB_val *key,
+                           uint64_t linked_from,
                            const LinkInfo *link,
                            PageInfo **page_info,
                            int *mdb_error) {
      MDB_val val;
      int mdb_rc = 0;
 
-     PageInfo *pi = *page_info = page_info_new_link(link->url, link->score);
+     PageInfo *pi = *page_info = page_info_new_link(link->url, linked_from, link->score);
      if (!pi)
           goto on_error;
 
@@ -803,13 +807,13 @@ page_db_add(PageDB *db, const CrawledPage *page, PageInfoList **page_info_list) 
      }
      size_t n_pages = *(size_t*)val.mv_data;
 
-     uint64_t hash = page_db_hash(page->url);
+     uint64_t cp_hash = page_db_hash(page->url);
      key.mv_size = sizeof(uint64_t);
-     key.mv_data = &hash;
+     key.mv_data = &cp_hash;
 
      if (db->domain_temp) {
           domain_temp_update(db->domain_temp, (float)page->time);
-          domain_temp_heat(db->domain_temp, page_db_hash_get_domain(hash));
+          domain_temp_heat(db->domain_temp, page_db_hash_get_domain(cp_hash));
      }
 
      PageInfo *pi;
@@ -818,7 +822,7 @@ page_db_add(PageDB *db, const CrawledPage *page, PageInfoList **page_info_list) 
           goto on_error;
      }
      if (page_info_list) {
-          *page_info_list = page_info_list_new(pi, hash);
+          *page_info_list = page_info_list_new(pi, cp_hash);
           if (!*page_info_list) {
                error = "allocating new PageInfo list";
                goto on_error;
@@ -845,6 +849,8 @@ page_db_add(PageDB *db, const CrawledPage *page, PageInfoList **page_info_list) 
           error = "could not malloc";
           goto on_error;
      }
+     // hash of the current URL
+     uint64_t hash = cp_hash;
      for (size_t i=0; i <= n_links; ++i) {
           const LinkInfo *link = i > 0? crawled_page_get_link(page, i - 1): 0;
           if (link) {
@@ -866,7 +872,8 @@ page_db_add(PageDB *db, const CrawledPage *page, PageInfoList **page_info_list) 
           case 0:
                *id = n_pages++;
                if (link) {
-                    if (page_db_add_link_page_info(cur_hash2info, &key, link, &pi, &mdb_rc) != 0) {
+                    if (page_db_add_link_page_info(
+                             cur_hash2info, &key, cp_hash, link, &pi, &mdb_rc) != 0) {
                          error = "adding/updating link info";
                          goto on_error;
                     }
