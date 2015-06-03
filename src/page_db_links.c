@@ -5,7 +5,6 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <inttypes.h>
-#include <regex.h>
 
 #include "page_db.h"
 
