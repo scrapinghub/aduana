@@ -34,7 +34,7 @@ endif(WIN32)
 
 # Main library
 ############################################################
-set(PAGE_DB_SRC
+set(ADUANA_SRC
   src/mmap_array.c
   src/page_db.c
   src/hits.c
@@ -52,7 +52,7 @@ set(PAGE_DB_SRC
   $<TARGET_OBJECTS:smaz>
 )
 if(WIN32)
-    set(PAGE_DB_SRC ${PAGE_DB_SRC} $<TARGET_OBJECTS:mman>)
+    set(ADUANA_SRC ${ADUANA_SRC} $<TARGET_OBJECTS:mman>)
 endif(WIN32)
 
 # Tests
@@ -60,26 +60,26 @@ endif(WIN32)
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
   add_definitions(-DTEST)
   include_directories(test)
-  set(PAGE_DB_SRC ${PAGE_DB_SRC} test/CuTest.c)
+  set(ADUANA_SRC ${ADUANA_SRC} test/CuTest.c)
   add_executable(test test/test.c)
-  target_link_libraries(test pagedb)
+  target_link_libraries(test aduana)
 endif()
 
 
-add_library(pagedb SHARED ${PAGE_DB_SRC})
+add_library(aduana SHARED ${ADUANA_SRC})
 include_directories(src)
-target_link_libraries(pagedb pthread m)
+target_link_libraries(aduana pthread m)
 
 add_executable(page_db_dump src/page_db_dump.c)
-target_link_libraries(page_db_dump pagedb)
+target_link_libraries(page_db_dump aduana)
 add_executable(page_db_find src/page_db_find.c)
-target_link_libraries(page_db_find pagedb)
+target_link_libraries(page_db_find aduana)
 add_executable(page_db_links src/page_db_links.c)
-target_link_libraries(page_db_links pagedb)
+target_link_libraries(page_db_links aduana)
 add_executable(page_db_path src/page_db_path.c)
-target_link_libraries(page_db_path pagedb)
+target_link_libraries(page_db_path aduana)
 
 # Installation
 #############################################################
-install(TARGETS pagedb DESTINATION lib)
+install(TARGETS aduana DESTINATION lib)
 install(TARGETS page_db_dump page_db_find page_db_links page_db_path DESTINATION bin)
