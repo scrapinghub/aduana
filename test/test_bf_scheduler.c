@@ -244,13 +244,81 @@ test_bf_scheduler_hits(CuTest *tc) {
      page_db_delete(db);
 }
 
+static void
+test_bf_scheduler_restart(CuTest *tc) {
+     char test_dir_db[] = "test-bfs-XXXXXX";
+     mkdtemp(test_dir_db);
+
+     PageDB *db;
+     int ret = page_db_new(&db, test_dir_db);
+     CuAssert(tc,
+              db!=0? db->error->message: "NULL",
+              ret == 0);
+     db->persist = 1;
+
+     BFScheduler *sch;
+     ret = bf_scheduler_new(&sch, db);
+     CuAssert(tc,
+              sch != 0? sch->error->message: "NULL",
+              ret == 0);
+     sch->persist = 1;
+
+     CrawledPage *cp = crawled_page_new("http://www.foobar.com/spam");
+     char link[1000];
+     for (int i=0; i<100; ++i) {
+          sprintf(link, "http://www.foobar.com/page_%d", i);
+          crawled_page_add_link(cp, link, ((float)i)/100.0);
+     }
+
+     CuAssert(tc,
+              sch->error->message,
+              bf_scheduler_add(sch, cp) == 0);
+     crawled_page_delete(cp);
+
+     PageRequest *reqs;
+     CuAssert(tc,
+              sch->error->message,
+              bf_scheduler_request(sch, 25, &reqs) == 0);
+     for (int i=0; i<25; ++i) {
+          sprintf(link, "http://www.foobar.com/page_%d", 99 - i);
+          CuAssertStrEquals(tc, link, reqs->urls[i]);
+     }
+     page_request_delete(reqs);
+     bf_scheduler_delete(sch);
+     page_db_delete(db);
+
+     // open again
+     ret = page_db_new(&db, test_dir_db);
+     CuAssert(tc,
+              db!=0? db->error->message: "NULL",
+              ret == 0);
+     db->persist = 0;
+
+     ret = bf_scheduler_new(&sch, db);
+     CuAssert(tc,
+              sch != 0? sch->error->message: "NULL",
+              ret == 0);
+     sch->persist = 0;
+
+     CuAssert(tc,
+              sch->error->message,
+              bf_scheduler_request(sch, 25, &reqs) == 0);
+     for (int i=0; i<25; ++i) {
+          sprintf(link, "http://www.foobar.com/page_%d", 74 - i);
+          CuAssertStrEquals(tc, link, reqs->urls[i]);
+     }
+     page_request_delete(reqs);
+     bf_scheduler_delete(sch);
+     page_db_delete(db);
+}
+
 CuSuite *
 test_bf_scheduler_suite(size_t n_pages) {
      test_n_pages = n_pages;
 
      CuSuite *suite = CuSuiteNew();
      SUITE_ADD_TEST(suite, test_bf_scheduler_requests);
-
+     SUITE_ADD_TEST(suite, test_bf_scheduler_restart);
      SUITE_ADD_TEST(suite, test_bf_scheduler_page_rank);
      SUITE_ADD_TEST(suite, test_bf_scheduler_hits);
 
