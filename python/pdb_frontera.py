@@ -1,12 +1,12 @@
 import frontera
 from frontera.core.models import Request
 import tempfile
-import pagedb
+import aduana
 
 class Backend(frontera.Backend):
     def __init__(self,
                  db=None,
-                 scorer_class=pagedb.HitsScorer,
+                 scorer_class=aduana.HitsScorer,
                  use_scores=False,
                  soft_crawl_limit=0.25,
                  hard_crawl_limit=100,
@@ -18,18 +18,18 @@ class Backend(frontera.Backend):
             db_path = tempfile.mkdtemp(prefix='frontera_', dir='./')
             persist = 0
 
-        self._page_db = pagedb.PageDB(db_path)
+        self._page_db = aduana.PageDB(db_path)
 
         if scorer_class is None:
             self._scorer = None
         else:
             self._scorer = scorer_class(self._page_db)
             if use_scores:
-                if scorer_class == pagedb.PageRankScorer:
+                if scorer_class == aduana.PageRankScorer:
                     self._scorer.damping = kwargs.get('page_rank_damping', 0.85)
                 self._scorer.use_content_scores = use_scores
 
-        self._scheduler = pagedb.BFScheduler(
+        self._scheduler = aduana.BFScheduler(
             self._page_db,
             scorer=self._scorer,
             persist=persist
@@ -43,7 +43,7 @@ class Backend(frontera.Backend):
         scorer = manager.settings.get('SCORER', None)
         if scorer:
             try:
-                scorer_class = getattr(pagedb, scorer)
+                scorer_class = getattr(aduana, scorer)
             except AttributeError:
                 manager.logger.backend.warning(
                     'Cannot load scorer class {0}. Using content scorer'.format(scorer))
@@ -70,7 +70,7 @@ class Backend(frontera.Backend):
 
     def add_seeds(self, seeds):
         self._scheduler.add(
-            pagedb.CrawledPage(
+            aduana.CrawledPage(
                 '_seed_{0}'.format(self._n_seeds),
                 [(link.url, 1.0) for link in seeds]
             )
@@ -81,7 +81,7 @@ class Backend(frontera.Backend):
         pass
 
     def page_crawled(self, response, links):
-        cp = pagedb.CrawledPage(
+        cp = aduana.CrawledPage(
             response.url,
             [(link.url, link.meta['scrapy_meta']['score']) for link in links])
         try:

@@ -2,10 +2,10 @@
 
 from distutils.core import setup
 
-setup(name='PageDB',
+setup(name='Aduana',
       version='0.1',
-      description='Bindings for PageDB library',
+      description='Bindings for Aduana library',
       author='Pedro Lopez-Adeva Fernandez-Layos',
       author_email='pedro@scrapinghub.com',
-      py_modules=['pagedb', 'pdb_frontera'],
+      py_modules=['aduana', 'pdb_frontera'],
      )
