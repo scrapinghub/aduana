@@ -41,6 +41,12 @@
 /** Number of steps to take between soft and hard crawl rate limit */
 #define BF_SCHEDULER_CRAWL_RATE_STEPS 5
 
+/** Don't update scores until this amount of new pages has arrived */
+#define BF_SCHEDULER_UPDATE_NUM_PAGES 100
+
+/** Don't update scores until this percentage of new pages has arrived */
+#define BF_SCHEDULER_UPDATE_PER_PAGES 0.01
+
 typedef enum {
      bf_scheduler_error_ok = 0,       /**< No error */
      bf_scheduler_error_memory,       /**< Error allocating memory */

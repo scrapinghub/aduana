@@ -464,8 +464,10 @@ bf_scheduler_update_thread(void *arg) {
      do {
           if ((rc = pthread_mutex_lock(&sch->update_thread->n_pages_mutex)) != 0)
                goto error_thread;
-          while ((sch->update_thread->n_pages_new < sch->update_thread->n_pages_old + 1000.0) ||
-                 (sch->update_thread->n_pages_new < 1.1*sch->update_thread->n_pages_old)) {
+          while ((sch->update_thread->n_pages_new <
+                  (sch->update_thread->n_pages_old + BF_SCHEDULER_UPDATE_NUM_PAGES)) ||
+                 (sch->update_thread->n_pages_new <
+                  sch->update_thread->n_pages_old*(1.0 + BF_SCHEDULER_UPDATE_PER_PAGES))) {
                if ((rc = pthread_cond_wait(&sch->update_thread->n_pages_cond,
                                            &sch->update_thread->n_pages_mutex)) != 0)
                     goto error_thread;
