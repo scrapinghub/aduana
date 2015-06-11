@@ -623,16 +623,16 @@ bf_scheduler_add_requests(BFScheduler *sch,
                }
                page_info_delete(pi);
           }
-          if (delete) {
-               if ((mdb_rc = mdb_cursor_del(cur, 0)) != 0) {
-                    error1 = "deleting head of schedule";
-                    error2 = mdb_strerror(mdb_rc);
+          if (delete && (mdb_rc = mdb_cursor_del(cur, 0)) != 0) {
+               error1 = "deleting head of schedule";
+               error2 = mdb_strerror(mdb_rc);
                     goto on_error;
-               }
-               cur_op = MDB_FIRST;
-          } else {
-               cur_op = MDB_NEXT;
           }
+          // If we delete an item, what's the state of the cursor? It appears you can
+          // use either MDB_NEXT or MDB_GET_CURRENT to get the next element. MDB_NEXT
+          // works both if we delete or not. See:
+          //     http://www.openldap.org/lists/openldap-devel/201502/msg00028.html
+          cur_op = MDB_NEXT;
      }
      return 0;
 on_error:
