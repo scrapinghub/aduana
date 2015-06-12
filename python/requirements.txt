@@ -1,0 +1,5 @@
+gevent==1.0.2
+falcon==0.3.0
+talons==0.3
+requests==2.5.3
+frontera
