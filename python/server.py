@@ -6,8 +6,8 @@ import importlib
 import argparse
 
 import falcon
-import gevent
-import gevent.wsgi
+from talons.auth import basicauth, middleware, external
+import gevent.pywsgi
 
 import aduana
 
@@ -26,6 +26,7 @@ class Settings(object):
     SEEDS             A file with one URL per line
     DEFAULT_REQS      If not specified by WebBackend return this number of requests
     PORT              Server will listen using this port
+    PASSWDS           A dictionary mapping login name to password
     """
 
     # Default settings
@@ -39,6 +40,7 @@ class Settings(object):
     DEFAULT_REQS = 10
     PORT = 8000
     SEEDS = None
+    PASSWDS = None
 
     def __init__(self, settings_module=None):
         """settings_module can be a python module which will be used to
@@ -46,10 +48,9 @@ class Settings(object):
         if settings_module:
             try:
                 self.config = importlib.import_module(settings_module)
-            except ImportError:
-                print(
-                    'WARNING: could not load server configuration: ' + settings_module,
-                    file=sys.stderr)
+            except ImportError as e:
+                print('WARNING: could not load server configuration ({0}): {1}'.format(
+                    e,  settings_module), file=sys.stderr)
                 self.config = None
         else:
             self.config = None
@@ -102,7 +103,7 @@ class Crawled(object):
             cp = aduana.CrawledPage(url, data.get('links', []))
             cp.score = data.get('score', 0.0)
         except TypeError as e:
-            error_response(resp, 'ERROR: Incorrect data inside CrawledPage. ' + e.strerror)
+            error_response(resp, 'ERROR: Incorrect data inside CrawledPage. ' + e)
             return
 
         self.scheduler.add(cp)
@@ -173,20 +174,41 @@ if __name__ == '__main__':
 
     seeds_path = settings('SEEDS')
     if seeds_path is None:
-        sys.exit("SEEDS setting is missing and mandatory. Exit")
+        sys.exit("ERROR: SEEDS setting is missing and mandatory. Exit")
 
     with open(seeds_path, 'r') as seeds:
         for i, line in enumerate(seeds):
             scheduler.add(
                 aduana.CrawledPage('_seed_{0}'.format(i), [(line.strip(), 1.0)]))
 
+    middlewares = []
+    passwds = settings('PASSWDS')
+    if passwds:
+        def authenticate(identity):
+            try:
+                return identity.key == passwds[identity.login]
+            except KeyError:
+                return False
+
+        def authorize(identity, request_action):
+            return True
+
+        auth = middleware.create_middleware(
+            identify_with=[basicauth.Identifier],
+            authenticate_with=external.Authenticator(
+                external_authn_callable=authenticate),
+            authorize_with=external.Authorizer(
+                external_authz_callable=authorize)
+        )
+        middlewares.append(auth)
+
     crawled = Crawled(scheduler)
     request = Request(scheduler, settings('DEFAULT_REQS'))
-    app = application = falcon.API()
+    app = application = falcon.API(before=middlewares)
     app.add_route('/crawled', crawled)
     app.add_route('/request', request)
 
-    server = gevent.wsgi.WSGIServer(('127.0.0.1', settings('PORT')), app)
+    server = gevent.pywsgi.WSGIServer(('127.0.0.1', settings('PORT')), app)
     print("Press Ctrl-C to exit")
     try:
         server.serve_forever()
