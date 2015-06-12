@@ -68,6 +68,9 @@ def error_response(resp, message):
 
 
 class Crawled(object):
+    def __init__(self, scheduler):
+        self.scheduler = scheduler
+
     def on_post(self, req, resp):
         """Serves POST requests for crawled pages.
 
@@ -102,12 +105,13 @@ class Crawled(object):
             error_response(resp, 'ERROR: Incorrect data inside CrawledPage. ' + e.strerror)
             return
 
-        scheduler.add(cp)
+        self.scheduler.add(cp)
         resp.status = falcon.HTTP_201
 
 
 class Request(object):
-    def __init__(self, default_reqs):
+    def __init__(self, scheduler, default_reqs = 10):
+        self.scheduler = scheduler
         self.default_reqs = default_reqs
 
     def on_get(self, req, resp):
@@ -124,7 +128,7 @@ class Request(object):
             error_response(resp, 'ERROR: Incorrect number of requests')
             return
 
-        urls = scheduler.requests(n_reqs)
+        urls = self.scheduler.requests(n_reqs)
         resp.data = json.dumps(urls)
         resp.content_type = "application/json"
         resp.status = falcon.HTTP_200
@@ -176,8 +180,8 @@ if __name__ == '__main__':
             scheduler.add(
                 aduana.CrawledPage('_seed_{0}'.format(i), [(line.strip(), 1.0)]))
 
-    crawled = Crawled()
-    request = Request(settings('DEFAULT_REQS'))
+    crawled = Crawled(scheduler)
+    request = Request(scheduler, settings('DEFAULT_REQS'))
     app = application = falcon.API()
     app.add_route('/crawled', crawled)
     app.add_route('/request', request)
