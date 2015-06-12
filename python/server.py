@@ -2,7 +2,7 @@
 from __future__ import print_function
 import sys
 import json
-import importlib
+import imp
 import argparse
 
 import falcon
@@ -47,7 +47,7 @@ class Settings(object):
         overwrite the default settings"""
         if settings_module:
             try:
-                self.config = importlib.import_module(settings_module)
+                self.config = imp.load_source('config', settings_module)
             except ImportError as e:
                 print('WARNING: could not load server configuration ({0}): {1}'.format(
                     e,  settings_module), file=sys.stderr)
