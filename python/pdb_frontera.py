@@ -2,6 +2,7 @@ import frontera
 from frontera.core.models import Request
 import tempfile
 import aduana
+import requests
 
 class Backend(frontera.Backend):
     def __init__(self,
@@ -93,3 +94,36 @@ class Backend(frontera.Backend):
 
     def get_next_requests(self, max_n_requests, **kwargs):
         return map(Request, self._scheduler.requests(max_n_requests))
+
+
+class WebBackend(frontera.Backend):
+    def __init__(self, server='http://localhost:8000'):
+        self.server = server
+
+    @classmethod
+    def from_manager(cls, manager):
+        return cls(server=manager.settings.get('SERVER', 'http://localhost:8000'))
+
+    def frontier_start(self):
+        pass
+
+    def frontier_stop(self):
+        pass
+
+    def add_seeds(self, seeds):
+        pass
+
+    def request_error(self, page, error):
+        pass
+
+    def page_crawled(self, response, links):
+        requests.post(self.server + '/crawled',
+                      json={
+                          'url': response.url,
+                          'score': response.meta.get('score', 0.0),
+                          'links': [(link.url, link.meta['scrapy_meta']['score']) for link in links]
+                      })
+
+    def get_next_requests(self, max_n_requests, **kwargs):
+        r = requests.get(self.server + '/request', params={'n': max_n_requests})
+        return map(Request, r.json())
