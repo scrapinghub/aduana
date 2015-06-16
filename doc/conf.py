@@ -33,6 +33,7 @@ extensions = [
     'sphinx.ext.autodoc',
     'sphinx.ext.mathjax',
     'sphinx.ext.viewcode',
+    'breathe'
 ]
 
 # Add any paths that contain templates here, relative to this directory.
@@ -53,6 +54,9 @@ master_doc = 'index'
 project = u'aduana'
 copyright = u'2015, Pedro López-Adeva Fernández-Layos'
 author = u'Pedro López-Adeva Fernández-Layos'
+
+breathe_projects = {'aduana-c': 'doxygen/xml'}
+breathe_default_project = 'aduana-c'
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
