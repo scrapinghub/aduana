@@ -3,7 +3,8 @@
 debug/
 release/
 test
-doc/
+doc/_build
+doc/doxygen
 test/data/*
 python/build/
 test/benchmark/python/build/
