@@ -11,7 +11,6 @@ import gevent.pywsgi
 
 import aduana
 
-
 class Settings(object):
     """Stores server settings.
 
@@ -25,8 +24,11 @@ class Settings(object):
     HARD_CRAWL_LIMIT  Force all domains below this limit
     SEEDS             A file with one URL per line
     DEFAULT_REQS      If not specified by WebBackend return this number of requests
+    ADDRESS           Server will list on this address
     PORT              Server will listen using this port
     PASSWDS           A dictionary mapping login name to password
+    SSL_KEY           Path to SSL keyfile
+    SSL_CERT          Path to SSL certificate
     """
 
     # Default settings
@@ -38,9 +40,12 @@ class Settings(object):
     SOFT_CRAWL_LIMIT = 0.25
     HARD_CRAWL_LIMIT = 100.0
     DEFAULT_REQS = 10
+    ADDRESS = '0.0.0.0'
     PORT = 8000
     SEEDS = None
     PASSWDS = None
+    SSL_KEY = None
+    SSL_CERT = None
 
     def __init__(self, settings_module=None):
         """settings_module can be a python module which will be used to
@@ -208,7 +213,21 @@ if __name__ == '__main__':
     app.add_route('/crawled', crawled)
     app.add_route('/request', request)
 
-    server = gevent.pywsgi.WSGIServer(('127.0.0.1', settings('PORT')), app)
+    key_path = settings('SSL_KEY')
+    cert_path = settings('SSL_CERT')
+
+    if (key_path and not cert_path) or (cert_path and not key_path):
+        print('WARNING: Both key file and certificate file are necessary. Disabling HTTPS',
+              file=sys.stderr)
+        key_path = None
+        cert_path = None
+
+    server = gevent.pywsgi.WSGIServer(
+        (settings('ADDRESS'), settings('PORT')),
+        app,
+        keyfile=key_path,
+        certfile=cert_path
+    )
     print("Press Ctrl-C to exit")
     try:
         server.serve_forever()

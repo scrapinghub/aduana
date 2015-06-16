@@ -3,6 +3,7 @@ from frontera.core.models import Request
 import tempfile
 import aduana
 import requests
+import requests.adapters
 
 class Backend(frontera.Backend):
     def __init__(self,
@@ -96,13 +97,28 @@ class Backend(frontera.Backend):
         return map(Request, self._scheduler.requests(max_n_requests))
 
 
+class IgnoreHostNameAdapter(requests.adapters.HTTPAdapter):
+    def cert_verify(self, conn, url, verify, cert):
+        conn.assert_hostname = False
+        return super(IgnoreHostNameAdapter,
+                     self).cert_verify(conn, url, verify, cert)
+
 class WebBackend(frontera.Backend):
-    def __init__(self, server='http://localhost:8000'):
-        self.server = server
+    def __init__(self,
+                 server_name='localhost',
+                 server_port=8000,
+                 server_cert=None):
+        schema = 'https' if server_cert else 'http'
+        self.server = '{0}://{1}:{2}'.format(schema, server_name, server_port)
+        self.server_cert = server_cert
+        self.session = requests.Session()
+        self.session.mount('https://', IgnoreHostNameAdapter())
 
     @classmethod
     def from_manager(cls, manager):
-        return cls(server=manager.settings.get('SERVER', 'http://localhost:8000'))
+        return cls(server_name=manager.settings.get('SERVER_NAME', 'localhost'),
+                   server_port=manager.settings.get('SERVER_PORT', 8000),
+                   server_cert=manager.settings.get('SERVER_CERT', None))
 
     def frontier_start(self):
         pass
@@ -117,13 +133,19 @@ class WebBackend(frontera.Backend):
         pass
 
     def page_crawled(self, response, links):
-        requests.post(self.server + '/crawled',
-                      json={
-                          'url': response.url,
-                          'score': response.meta.get('score', 0.0),
-                          'links': [(link.url, link.meta['scrapy_meta']['score']) for link in links]
-                      })
+        self.session.post(self.server + '/crawled',
+                          json={
+                              'url': response.url,
+                              'score': response.meta.get('score', 0.0),
+                              'links': [(link.url, link.meta['scrapy_meta']['score']) for link in links]
+                          },
+                          verify=self.server_cert is not None
+        )
 
     def get_next_requests(self, max_n_requests, **kwargs):
-        r = requests.get(self.server + '/request', params={'n': max_n_requests})
+        r = self.session.get(
+            self.server + '/request',
+            params={'n': max_n_requests},
+            verify=self.server_cert
+        )
         return map(Request, r.json())
