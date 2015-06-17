@@ -52,8 +52,8 @@ master_doc = 'index'
 
 # General information about the project.
 project = u'aduana'
-copyright = u'2015, Pedro López-Adeva Fernández-Layos'
-author = u'Pedro López-Adeva Fernández-Layos'
+copyright = u'2015, Aduana team'
+author = u'Aduana team'
 
 breathe_projects = {'aduana-c': 'doxygen/xml'}
 breathe_default_project = 'aduana-c'
@@ -116,7 +116,7 @@ todo_include_todos = False
 
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
-html_theme = 'alabaster'
+html_theme = 'sphinx_rtd_theme'
 
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the

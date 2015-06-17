@@ -63,14 +63,13 @@ typedef struct {
      size_t m_links;      /**< Maximum number of items that can be stored inside link_info */
 } PageLinks;
 
-/** The information that comes with a crawled page.
- *
- * We do not allocate any space for error handling since the operations are very
- * simple. Functions return an int to signal the status, a 0 meaning success and -1
- * meaning error. The only type of error possible is a memory error where a malloc or
- * realloc has failed.
- * */
+/** The information that comes with a crawled page. */
 typedef struct {
+     /* We do not allocate any space for error handling since the operations are very
+      * simple. Functions return an int to signal the status, a 0 meaning success and -1
+      * meaning error. The only type of error possible is a memory error where a malloc or
+      * realloc has failed. */
+
      char *url;                   /**< ASCII, null terminated string for the page URL*/
      PageLinks *links;            /**< List of links inside this page */
      double time;                 /**< Number of seconds since epoch */
@@ -85,7 +84,7 @@ typedef struct {
     url is a new copy
 
     The following defaults are used for the different fields:
-    - links: no links initially. Use crawled_page_add_link to add some.
+    - links: no links initially. Use @ref crawled_page_add_link to add some.
     - time: current time
     - score: 0. It can be setted directly.
     - content_hash: NULL. Use @ref crawled_page_set_hash to change
@@ -147,9 +146,9 @@ typedef struct {
      double first_crawl;          /**< First time this page was crawled */
      double last_crawl;           /**< Last time this page was crawled */
      size_t n_changes;            /**< Number of content changes detected between first and last crawl */
-     size_t n_crawls;             /**< Number of times this page has crawled. Can be zero if it has been observed just as a link*/
+     size_t n_crawls;             /**< Number of times this page has been crawled. Can be zero if it has been observed just as a link*/
      float score;                 /**< A copy of the same field at the last crawl */
-     size_t content_hash_length;  /**< Number of bytes in @ref content_hash */
+     size_t content_hash_length;  /**< Number of bytes in @ref PageInfo::content_hash */
      char *content_hash;          /**< Byte sequence with the hash of the last crawl */
 } PageInfo;
 
@@ -241,16 +240,16 @@ typedef enum {
 /** Page database.
  *
  * We are really talking about 4 diferent key/value databases:
- *   - info
- *        Contains fixed size information about the whole database. Right now
+ *   - info:
+ *        contains fixed size information about the whole database. Right now
  *        it just contains the number of pages stored.
- *   - hash2idx
- *        Maps URL hash to index. Indices are consecutive identifier for every
+ *   - hash2idx:
+ *        maps URL hash to index. Indices are consecutive identifier for every
  *        page. This allows to map pages to elements inside arrays.
- *   - hash2info
- *        Maps URL hash to a @ref PageInfo structure.
- *   - links
- *        Maps URL index to links indices. This allows us to make a fast streaming
+ *   - hash2info:
+ *        maps URL hash to a @ref PageInfo structure.
+ *   - links:
+ *        maps URL index to links indices. This allows us to make a fast streaming
  *        of all links inside a database.
  */
 typedef struct {
