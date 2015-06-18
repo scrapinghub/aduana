@@ -5,23 +5,6 @@
 #include "link_stream.h"
 
 /** @addtogroup Hits
- *
- * Implementation of the HITS algorithm.
- * See for example [Wikipedia](http://en.wikipedia.org/wiki/HITS_algorithm).
- *
- * Additionally, it allows to merge the pure link based original algorithm with
- * page content scores. The idea is that the authority scores are distributed
- * back to the hub according to the content score. For example imagine that page
- * A links to B, C and D and the content/authority scores are:
- *
- * -B: 0.5 / 0.1
- * -C: 0.1 / 1.0
- * -D: 0.9 / 0.5
- *
- * Then the hub score of A would be computed as:
- *
- * Hub(A) = 0.5*0.1 + 0.1*1.0 + 0.9*0.5
- *
  * @{
  */
 
@@ -36,6 +19,23 @@ typedef enum {
 #define HITS_DEFAULT_PRECISION 1e-4  /**< Default @ref Hits::precision */
 #define HITS_DEFAULT_PERSIST 0       /**< Default @ref Hits::persist */
 
+/** Implementation of the HITS algorithm.
+ *
+ * See for example [Wikipedia](http://en.wikipedia.org/wiki/HITS_algorithm).
+ *
+ * Additionally, it allows to merge the pure link based original algorithm with
+ * page content scores. The idea is that the authority scores are distributed
+ * back to the hub according to the content score. For example imagine that page
+ * A links to B, C and D and the content/authority scores are:
+ *
+ * -B: 0.5 / 0.1
+ * -C: 0.1 / 1.0
+ * -D: 0.9 / 0.5
+ *
+ * Then the hub score of A would be computed as:
+ *
+ * Hub(A) = 0.5*0.1 + 0.1*1.0 + 0.9*0.5
+ */
 typedef struct {
      /** Hub score, previous iteration */
      MMapArray *h1;

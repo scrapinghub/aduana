@@ -5,12 +5,6 @@
 #include "link_stream.h"
 
 /** @addtogroup PageRank
- *
- * Implementation of the PageRank algorithm.
- * See for example [Wikipedia](http://en.wikipedia.org/wiki/PageRank).
- *
- * Additionally, it allows to merge the pure link based original algorithm with
- * page content scores.
  * @{
  */
 
@@ -26,6 +20,13 @@ typedef enum {
 #define PAGE_RANK_DEFAULT_PRECISION 1e-4  /**< Default @ref PageRank::precision */
 #define PAGE_RANK_DEFAULT_PERSIST 0       /**< Default @ref PageRank::persist */
 
+/** Implementation of the PageRank algorithm.
+ *
+ * See for example [Wikipedia](http://en.wikipedia.org/wiki/PageRank).
+ *
+ * Additionally, it allows to merge the pure link based original algorithm with
+ * page content scores.
+ */
 typedef struct {
      /** Number of outgoing links.
       *

@@ -9,16 +9,6 @@
 #include "txn_manager.h"
 
 /** @addtogroup BFScheduler
- *
- * BestFirst scheduler. As it name implies this scheduler follows a greedy
- * strategy to decide which page is going to crawl next. It mains an ordered
- * list of uncrawled pages. To decide the next page to be crawled this scheduler
- * picks the highest score page and removes it from the top of the list.
- *
- * The key is then to assign valid scores to the pages. If no scorer is selected
- * this scheduler will use the score provided when the page is
- * crawled. Additionally an alternative scorer can be set up, see for example
- * @ref page_rank_scorer_setup or @ref hits_scorer_setup.
  * @{
  */
 
@@ -101,6 +91,18 @@ typedef struct {
      UpdateThreadState state; /**< See @ref UpdateThreadState */
 } UpdateThread;
 
+/** BestFirst scheduler.
+ *
+ * As it name implies this scheduler follows a greedy
+ * strategy to decide which page is going to crawl next. It mains an ordered
+ * list of uncrawled pages. To decide the next page to be crawled this scheduler
+ * picks the highest score page and removes it from the top of the list.
+ *
+ * The key is then to assign valid scores to the pages. If no scorer is selected
+ * this scheduler will use the score provided when the page is
+ * crawled. Additionally an alternative scorer can be set up, see for example
+ * @ref page_rank_scorer_setup or @ref hits_scorer_setup.
+ */
 typedef struct {
      /** Page database
       *

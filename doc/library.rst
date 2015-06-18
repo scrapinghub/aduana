@@ -136,7 +136,7 @@ the :cpp:class:`PageInfo` and how pages are linked between them.
 
 The first thing to understand is that there are two different ways to
 refer to a given page, using either the URL hash or the *index*. Both
-ways of addressing the page are linked in the *hash2idx* database. 
+ways of addressing the page are linked in the *hash2idx* database.
 
 URL hash
 ~~~~~~~~
@@ -149,7 +149,7 @@ When a new :cpp:class:`CrawledPage` arrives we compute the hash of
 :cpp:member:`CrawledPage::url` and use this as the key inside the
 *hash2info* database, to retrieve the associated
 :cpp:class:`PageInfo`. If no entry is found inside the database a new
-one is created. We do the same with each one of the links inside 
+one is created. We do the same with each one of the links inside
 :cpp:member:`CrawledPage::links`.
 
 The following two functions are useful to extract the different parts
@@ -204,14 +204,14 @@ database. Links are stored then as lists where the first element is
 the originating page index and the rest of the elements are the
 indices of the outoging links. For example, taken from a real crawl::
 
-    7 1243 1245 1251 1254 1260 1262 1263 
-      1264 1267 1269 1271 1274 1275 1276 
+    7 1243 1245 1251 1254 1260 1262 1263
+      1264 1267 1269 1271 1274 1275 1276
       1277 1280 1283 1286 1289 1291 1295
       1309 1311 ...
 
 Since we want be able to perform big crawls with billions of pages we
 use 64 bit integers for the indices, which means they still take as
-much space as the URL hashes. However, these links are delta-encoded: 
+much space as the URL hashes. However, these links are delta-encoded:
 starting at the second element of the list we substract the previous one::
 
     7 2 6 3 6 2 1 1 3 2 2 3 1 1 1 3 3 3 3 2 4 14 2 ...
@@ -237,6 +237,8 @@ Data structures
 
 .. doxygenstruct:: PageDB
    :members:
+
+.. doxygenenum:: PageDBError
 
 Constructor/Destructor
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -352,7 +354,7 @@ and
 
 .. doxygentypedef:: LinkStreamResetFunc
 
-for 
+for
 
 .. doxygenfunction:: page_db_link_stream_reset(void *)
 
@@ -386,7 +388,7 @@ HashIdxStream
 
 This is used in two different places. The first one is the command
 line utility *page_db_links* which returns which pages link or are
-linked from other page. 
+linked from other page.
 
 The other more important use case is inside schedulers, which after
 pages scores are updated, need to iterate over all of them to see
@@ -414,7 +416,7 @@ DomainTemp
 This is used inside :cpp:class:`PageDB` to track how many times the
 most often domains are crawled. This information will in turn be used
 by the scheduler, which will try to not serve requests for the most
-crawled domains. 
+crawled domains.
 
 Ideally, for each domain we would store a (growing) list of timestamps when
 some page in the domain has been crawled. With this list in hand
@@ -501,3 +503,354 @@ Functions
 .. doxygenfunction:: domain_temp_heat(DomainTemp *, uint32_t)
 
 .. doxygenfunction:: domain_temp_get(DomainTemp *, uint32_t)
+
+Error handling
+--------------
+Errors are signaled in the following ways:
+
+- For functions not returning pointers 0 means success and any other
+  value some kind of failure. Usually an enumeration of error codes
+  is defined, otherwise -1 is used as failure code.
+
+- For functions returning pointers failure is signaled returning a
+  null pointer.
+
+- If the causes of error are varied enough the structures inside this
+  library have an :cpp:class:`Error` structure, which contains the
+  error code and an error message. The error message usually resembles
+  an stack trace to aid debugging the problem.
+
+Data structures
+~~~~~~~~~~~~~~~
+
+.. doxygendefine:: MAX_ERROR_LENGTH
+
+.. doxygenstruct:: Error
+   :members:
+
+Constructor/Destructor
+~~~~~~~~~~~~~~~~~~~~~~
+.. doxygenfunction:: error_init(Error *)
+
+.. doxygenfunction:: error_destroy(Error *)
+
+.. doxygenfunction:: error_new(void)
+
+.. doxygenfunction:: error_delete(Error *)
+
+Functions
+~~~~~~~~~
+.. doxygenfunction:: error_set(Error *, int, const char *)
+
+.. doxygenfunction:: error_clean(Error *)
+
+.. doxygenfunction:: error_add(Error *, const char *)
+
+.. doxygenfunction:: error_message(const Error *)
+
+.. doxygenfunction:: error_code(const Error *)
+
+TxnManager
+----------
+
+Data structures
+~~~~~~~~~~~~~~~
+.. doxygenstruct:: TxnManager
+   :members:
+
+.. doxygenstruct:: InvSemaphore
+   :members:
+
+.. doxygenenum:: TxnManagerError
+
+Constructor/Destructor
+~~~~~~~~~~~~~~~~~~~~~~
+
+.. doxygenfunction:: txn_manager_new(TxnManager **, MDB_env *)
+
+.. doxygenfunction:: txn_manager_delete(TxnManager *)
+
+Functions
+~~~~~~~~~
+
+The following functions are wrappers around the corresponding ones in
+LMDB. They will increment/decrement automatically the read and write
+transactions counters.
+
+.. doxygenfunction:: txn_manager_begin(TxnManager *, int, MDB_txn **)
+
+.. doxygenfunction:: txn_manager_commit(TxnManager *, MDB_txn *)
+
+.. doxygenfunction:: txn_manager_abort(TxnManager *, MDB_txn *)
+
+The following function is the main reason for the existence of
+:cpp:class:`TxnManager`.
+
+.. doxygenfunction:: txn_manager_expand(TxnManager *)
+
+.. doxygendefine:: MDB_MINIMUM_FREE_PAGES
+
+
+BFScheduler
+-----------
+
+Data structures
+~~~~~~~~~~~~~~~
+
+.. doxygendefine:: BF_SCHEDULER_DEFAULT_SIZE
+
+.. doxygendefine:: BF_SCHEDULER_DEFAULT_PERSIST
+
+.. doxygenstruct:: BFScheduler
+   :members:
+
+.. doxygenenum:: BFSchedulerError
+
+Constructor/Destructor
+~~~~~~~~~~~~~~~~~~~~~~
+
+.. doxygenfunction:: bf_scheduler_new(BFScheduler **, PageDB *)
+
+.. doxygenfunction:: bf_scheduler_delete(BFScheduler *)
+
+Input/Output
+~~~~~~~~~~~~
+
+.. doxygenfunction:: bf_scheduler_add(BFScheduler *, const CrawledPage *)
+
+.. doxygenfunction:: bf_scheduler_request(BFScheduler *, size_t, PageRequest **)
+
+Update scores
+~~~~~~~~~~~~~
+
+.. doxygendefine:: BF_SCHEDULER_UPDATE_BATCH_SIZE
+
+.. doxygendefine:: BF_SCHEDULER_UPDATE_NUM_PAGES
+
+.. doxygendefine:: BF_SCHEDULER_UPDATE_PER_PAGES
+
+.. doxygenfunction:: bf_scheduler_update_start(BFScheduler *)
+
+.. doxygenfunction:: bf_scheduler_update_stop(BFScheduler *)
+
+Settings
+~~~~~~~~
+
+.. doxygenfunction:: bf_scheduler_set_persist(BFScheduler *, int)
+
+.. doxygendefine:: BF_SCHEDULER_CRAWL_RATE_STEPS
+
+.. doxygenfunction:: bf_scheduler_set_max_domain_crawl_rate(BFScheduler *, float, float)
+
+Scorer
+------
+
+.. doxygenstruct:: Scorer
+   :members:
+
+.. doxygentypedef:: ScorerUpdateFunc
+
+.. doxygentypedef:: ScorerAddFunc
+
+.. doxygentypedef:: ScorerGetFunc
+
+To see concrete implementations have a look at
+:cpp:class:`PageRankScorer` and :cpp:class:`HitsScorer`.
+
+PageRankScorer
+--------------
+
+Data structures
+~~~~~~~~~~~~~~~
+
+.. doxygendefine:: PAGE_RANK_SCORER_USE_CONTENT_SCORES
+
+.. doxygendefine:: PAGE_RANK_SCORER_PERSIST
+
+.. doxygenstruct:: PageRankScorer
+   :members:
+
+.. doxygenenum:: PageRankScorerError
+
+Constructor/Destructor
+~~~~~~~~~~~~~~~~~~~~~~
+
+.. doxygenfunction:: page_rank_scorer_new(PageRankScorer **, PageDB *)
+
+.. doxygenfunction:: page_rank_scorer_delete(PageRankScorer *)
+
+
+Functions
+~~~~~~~~~
+
+.. doxygenfunction:: page_rank_scorer_add(void *, const PageInfo *, float *)
+
+.. doxygenfunction:: page_rank_scorer_get(void *, size_t, float *, float *)
+
+.. doxygenfunction:: page_rank_scorer_update(void *)
+
+.. doxygenfunction:: page_rank_scorer_setup(PageRankScorer *, Scorer *)
+
+Settings
+--------
+
+.. doxygenfunction:: page_rank_scorer_set_persist(PageRankScorer *, int)
+
+.. doxygenfunction:: page_rank_scorer_set_use_content_scores(PageRankScorer *, int)
+
+.. doxygenfunction:: page_rank_scorer_set_damping(PageRankScorer *, float)
+
+
+HitsScorer
+----------
+
+Data structures
+~~~~~~~~~~~~~~~
+
+.. doxygendefine:: HITS_SCORER_USE_CONTENT_SCORES
+
+.. doxygendefine:: HITS_SCORER_PERSIST
+
+.. doxygenstruct:: HitsScorer
+   :members:
+
+.. doxygenenum:: HitsScorerError
+
+Constructor/Destructor
+~~~~~~~~~~~~~~~~~~~~~~
+
+.. doxygenfunction:: hits_scorer_new(HitsScorer **, PageDB *)
+
+.. doxygenfunction:: hits_scorer_delete(HitsScorer *)
+
+
+Functions
+~~~~~~~~~
+
+.. doxygenfunction:: hits_scorer_add(void *, const PageInfo *, float *)
+
+.. doxygenfunction:: hits_scorer_get(void *, size_t, float *, float *)
+
+.. doxygenfunction:: hits_scorer_update(void *)
+
+.. doxygenfunction:: hits_scorer_setup(HitsScorer *, Scorer *)
+
+Settings
+--------
+
+.. doxygenfunction:: hits_scorer_set_persist(HitsScorer *, int)
+
+.. doxygenfunction:: hits_scorer_set_use_content_scores(HitsScorer *, int)
+
+
+PageRank
+--------
+
+Data structures
+~~~~~~~~~~~~~~~
+
+.. doxygendefine:: PAGE_RANK_DEFAULT_DAMPING
+
+.. doxygendefine:: PAGE_RANK_DEFAULT_MAX_LOOPS
+
+.. doxygendefine:: PAGE_RANK_DEFAULT_PRECISION
+
+.. doxygendefine:: PAGE_RANK_DEFAULT_PERSIST
+
+.. doxygenstruct:: PageRank
+   :members:
+
+.. doxygenenum:: PageRankError
+
+Constructor/Destructor
+~~~~~~~~~~~~~~~~~~~~~~
+
+.. doxygenfunction:: page_rank_new(PageRank **, const char *, size_t)
+
+.. doxygenfunction:: page_rank_delete(PageRank *)
+
+
+Functions
+~~~~~~~~~
+
+.. doxygenfunction:: page_rank_set_n_pages(PageRank *, size_t)
+
+.. doxygenfunction:: page_rank_compute(PageRank *, void *, LinkStreamNextFunc *, LinkStreamResetFunc *)
+
+.. doxygenfunction:: page_rank_get(const PageRank *, size_t, float *, float *)
+
+.. doxygenfunction:: page_rank_set_persist(PageRank *, int)
+
+
+Hits
+----
+
+Data structures
+~~~~~~~~~~~~~~~
+
+.. doxygendefine:: HITS_DEFAULT_MAX_LOOPS
+
+.. doxygendefine:: HITS_DEFAULT_PRECISION
+
+.. doxygendefine:: HITS_DEFAULT_PERSIST
+
+.. doxygenstruct:: Hits
+   :members:
+
+.. doxygenenum:: HitsError
+
+Constructor/Destructor
+~~~~~~~~~~~~~~~~~~~~~~
+
+.. doxygenfunction:: hits_new(Hits **, const char *, size_t)
+
+.. doxygenfunction:: hits_delete(Hits *)
+
+
+Functions
+~~~~~~~~~
+
+.. doxygenfunction:: hits_set_n_pages(Hits *, size_t)
+
+.. doxygenfunction:: hits_compute(Hits *, void *, LinkStreamNextFunc *, LinkStreamResetFunc *)
+
+.. doxygenfunction:: hits_get_hub(const Hits *, size_t, float *, float *)
+
+.. doxygenfunction:: hits_get_authority(const Hits *, size_t, float *, float *)
+
+.. doxygenfunction:: hits_set_persist(Hits *, int)
+
+
+MMapArray
+---------
+
+Data structures
+~~~~~~~~~~~~~~~
+
+.. doxygenstruct:: MMapArray
+   :members:
+
+.. doxygenenum:: MMapArrayError
+
+Constructor/Destructor
+~~~~~~~~~~~~~~~~~~~~~~
+
+.. doxygenfunction:: mmap_array_new(MMapArray **, const char *, size_t, size_t)
+
+.. doxygenfunction:: mmap_array_delete(MMapArray *)
+
+
+Functions
+~~~~~~~~~
+
+.. doxygenfunction:: mmap_array_advise(MMapArray *, int)
+
+.. doxygenfunction:: mmap_array_sync(MMapArray *, int)
+
+.. doxygenfunction:: mmap_array_idx(MMapArray *, size_t)
+
+.. doxygenfunction:: mmap_array_set(MMapArray *, size_t, const void *)
+
+.. doxygenfunction:: mmap_array_zero(MMapArray *)
+
+.. doxygenfunction:: mmap_array_resize(MMapArray *, size_t)

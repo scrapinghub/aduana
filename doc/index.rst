@@ -12,8 +12,8 @@ Contents:
    :maxdepth: 2
 
    intro
-   library
    python
+   library
 
 Indices and tables
 ==================
