@@ -15,5 +15,5 @@ setup(name             = 'aduana',
       ],
       setup_requires   = ['cffi >= 1.1.2'],
       install_requires = ['cffi >= 1.1.2'],
-      cffi_modules     = ['aduana_build.py:ffi']
+      cffi_modules     = ['build_wrapper.py:ffi']
 )
