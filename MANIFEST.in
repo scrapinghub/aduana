@@ -1,0 +1,2 @@
+include build_wrapper.py
+recursive-include lib *.h
