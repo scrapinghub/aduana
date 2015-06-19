@@ -1,11 +1,15 @@
 #!/usr/bin/env python
 
-from distutils.core import setup
+from setuptools import setup
 
-setup(name='Aduana',
-      version='0.1',
-      description='Bindings for Aduana library',
-      author='Pedro Lopez-Adeva Fernandez-Layos',
-      author_email='pedro@scrapinghub.com',
-      py_modules=['aduana', 'pdb_frontera'],
-     )
+setup(name             = 'aduana',
+      version          = '0.1',
+      description      = 'Bindings for Aduana library',
+      url              = 'https://github.com/scrapinghub/aduana',
+      author           = 'Pedro Lopez-Adeva Fernandez-Layos',
+      author_email     = 'pedro@scrapinghub.com',
+      py_modules       = ['aduana', 'pdb_frontera'],
+      setup_requires   = ['cffi >= 1.1.2'],
+      install_requires = ['cffi >= 1.1.2'],
+      cffi_modules     = ['aduana_build.py:ffi']
+)
