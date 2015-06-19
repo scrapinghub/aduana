@@ -99,16 +99,18 @@ class Crawled(object):
             return
 
         try:
-            url = data['url']
+            url = data['url'].encode('ascii', 'ignore')
         except KeyError:
             error_response(resp, 'ERROR: could not find "url" field in request')
             return
 
         try:
-            cp = aduana.CrawledPage(url, data.get('links', []))
+            links = [(lurl.encode('ascii', 'ignore'), score)
+                     for (lurl, score) in data.get('links', [])]
+            cp = aduana.CrawledPage(url, links)
             cp.score = data.get('score', 0.0)
         except TypeError as e:
-            error_response(resp, 'ERROR: Incorrect data inside CrawledPage. ' + e)
+            error_response(resp, 'ERROR: Incorrect data inside CrawledPage. ' + str(e))
             return
 
         self.scheduler.add(cp)
@@ -135,7 +137,7 @@ class Request(object):
             return
 
         urls = self.scheduler.requests(n_reqs)
-        resp.data = json.dumps(urls)
+        resp.data = json.dumps(urls, ensure_ascii=True)
         resp.content_type = "application/json"
         resp.status = falcon.HTTP_200
 
