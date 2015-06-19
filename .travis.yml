@@ -7,8 +7,8 @@ compiler:
 before_script:
   - wget https://googledrive.com/host/0B2gfQTHH9447fk1OWTM1OFMxUkMyajR0QUZ2WFdNZEc3d2kxM3RrM3hobnJzSTA0WlpiZ28/cmake-3.2.2-Linux-x86_64.tar.gz
   - tar -zxvf cmake-3.2.2-Linux-x86_64.tar.gz
-  - mkdir debug
-  - cd debug
+  - mkdir lib/debug
+  - cd lib/debug
 
 script:
   - ../cmake-3.2.2-Linux-x86_64/bin/cmake .. -DCMAKE_BUILD_TYPE=Debug

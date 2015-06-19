@@ -1,8 +1,8 @@
 import platform
 import cffi
 
-aduana_src_root = 'src/'
-aduana_lib_root = 'lib/'
+aduana_src_root = 'lib/src/'
+aduana_lib_root = 'lib/lib/'
 
 aduana_src = [
     aduana_lib_root + x for x in [
