@@ -4,4 +4,5 @@ talons==0.3
 requests==2.5.3
 pyOpenSSL==0.14
 breathe==4.0.0
+cffi==1.1.2
 frontera
