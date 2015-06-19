@@ -1,3 +1,5 @@
+from __future__ import absolute_import
+
 import frontera
 from frontera.core.models import Request
 import tempfile
