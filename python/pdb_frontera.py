@@ -7,12 +7,14 @@ import requests.adapters
 
 class Backend(frontera.Backend):
     def __init__(self,
+                 logger,
                  db=None,
                  scorer_class=aduana.HitsScorer,
                  use_scores=False,
                  soft_crawl_limit=0.25,
                  hard_crawl_limit=100,
                  **kwargs):
+        self.logger = logger
         if db:
             db_path = db
             persist = 1
@@ -56,6 +58,7 @@ class Backend(frontera.Backend):
             scorer_class = None
 
         return cls(
+            logger=manager.logger.backend,
             db=manager.settings.get('PAGE_DB_PATH', None),
             use_scores=manager.settings.get('USE_SCORES', False),
             scorer_class=scorer_class,
@@ -105,9 +108,11 @@ class IgnoreHostNameAdapter(requests.adapters.HTTPAdapter):
 
 class WebBackend(frontera.Backend):
     def __init__(self,
+                 logger,
                  server_name='localhost',
                  server_port=8000,
                  server_cert=None):
+        self.logger = logger
         schema = 'https' if server_cert else 'http'
         self.server = '{0}://{1}:{2}'.format(schema, server_name, server_port)
         self.server_cert = server_cert
@@ -116,7 +121,8 @@ class WebBackend(frontera.Backend):
 
     @classmethod
     def from_manager(cls, manager):
-        return cls(server_name=manager.settings.get('SERVER_NAME', 'localhost'),
+        return cls(logger=manager.logger.backend,
+                   server_name=manager.settings.get('SERVER_NAME', 'localhost'),
                    server_port=manager.settings.get('SERVER_PORT', 8000),
                    server_cert=manager.settings.get('SERVER_CERT', None))
 
@@ -133,14 +139,17 @@ class WebBackend(frontera.Backend):
         pass
 
     def page_crawled(self, response, links):
-        self.session.post(self.server + '/crawled',
-                          json={
-                              'url': response.url,
-                              'score': response.meta.get('score', 0.0),
-                              'links': [(link.url, link.meta['scrapy_meta']['score']) for link in links]
-                          },
-                          verify=self.server_cert is not None
+        r = self.session.post(
+            self.server + '/crawled',
+            json={
+                'url': response.url,
+                'score': response.meta.get('score', 0.0),
+                'links': [(link.url, link.meta['scrapy_meta']['score']) for link in links]
+            },
+            verify=self.server_cert is not None
         )
+        if r.status_code != 201:
+            self.logger.warning(r.text)
 
     def get_next_requests(self, max_n_requests, **kwargs):
         r = self.session.get(
@@ -148,4 +157,8 @@ class WebBackend(frontera.Backend):
             params={'n': max_n_requests},
             verify=self.server_cert
         )
-        return map(Request, r.json())
+        if r.status_code != 200:
+            self.logger.warning(r.text)
+            return []
+        else:
+            return map(Request, r.json())
