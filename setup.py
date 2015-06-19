@@ -8,7 +8,11 @@ setup(name             = 'aduana',
       url              = 'https://github.com/scrapinghub/aduana',
       author           = 'Pedro Lopez-Adeva Fernandez-Layos',
       author_email     = 'pedro@scrapinghub.com',
-      py_modules       = ['aduana', 'pdb_frontera'],
+      packages         = ['aduana'],
+      scripts          = [
+          'aduana/bin/aduana-server.py', 
+          'aduana/bin/aduana-server-cert.py'
+      ],
       setup_requires   = ['cffi >= 1.1.2'],
       install_requires = ['cffi >= 1.1.2'],
       cffi_modules     = ['aduana_build.py:ffi']
