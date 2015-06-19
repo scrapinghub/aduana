@@ -12,11 +12,11 @@ platform. From time to time I test also on OS X and Windows 8 using
 [MinGW64](http://mingw-w64.yaxm.org/doku.php).
 
 # Installation
-    pip install -r requirements.txt
-    python setup.py install
+    pip install aduana
 
 # Example
     cd example
+    pip install -r requirements
     scrapy crawl example
 
 # Documentation

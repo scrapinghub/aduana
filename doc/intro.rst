@@ -41,18 +41,6 @@ also:
 
 Installation
 ------------
+Use pip::
 
-Making this pip-installable is right now in the TODO list (with high
-priority). Meanwhile the following incantations are necessary:
-
-1. Install the C library::
-
-       mkdir release
-       cmake .. -DCMAKE_BUILD_TYPE=Release
-       make && sudo make install
-
-2. Install the Python module::
-
-       cd ../python
-       pip install -r requirements.txt
-       python setup.py install
+       pip install aduana
