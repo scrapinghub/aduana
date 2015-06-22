@@ -6,6 +6,8 @@ import tempfile
 import aduana
 import requests
 import requests.adapters
+import requests.auth
+
 
 class Backend(frontera.Backend):
     def __init__(self,
@@ -113,20 +115,26 @@ class WebBackend(frontera.Backend):
                  logger,
                  server_name='localhost',
                  server_port=8000,
-                 server_cert=None):
+                 server_cert=None,
+                 user=None,
+                 passwd=None):
         self.logger = logger
         schema = 'https' if server_cert else 'http'
         self.server = '{0}://{1}:{2}'.format(schema, server_name, server_port)
         self.server_cert = server_cert
         self.session = requests.Session()
         self.session.mount('https://', IgnoreHostNameAdapter())
+        if user and passwd:
+            self.session.auth = requests.auth.HTTPBasicAuth(user, passwd)
 
     @classmethod
     def from_manager(cls, manager):
         return cls(logger=manager.logger.backend,
                    server_name=manager.settings.get('SERVER_NAME', 'localhost'),
                    server_port=manager.settings.get('SERVER_PORT', 8000),
-                   server_cert=manager.settings.get('SERVER_CERT', None))
+                   server_cert=manager.settings.get('SERVER_CERT', None),
+                   user=manager.settings.get('USER', None),
+                   passwd=manager.settings.get('PASSWD', None))
 
     def frontier_start(self):
         pass
