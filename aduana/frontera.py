@@ -65,7 +65,7 @@ class Backend(frontera.Backend):
             use_scores=manager.settings.get('USE_SCORES', False),
             scorer_class=scorer_class,
             soft_crawl_limit=manager.settings.get('SOFT_CRAWL_LIMIT', 0.25),
-            hard_crawl_limit=manager.settings.get('SOFT_CRAWL_LIMIT', 100.0),
+            hard_crawl_limit=manager.settings.get('HARD_CRAWL_LIMIT', 100.0),
             page_rank_damping=manager.settings.get('PAGE_RANK_DAMPING', 0.85)
         )
 
