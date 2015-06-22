@@ -3,7 +3,7 @@
 from setuptools import setup
 
 setup(name             = 'aduana',
-      version          = '0.2',
+      version          = '0.2.1',
       description      = 'Bindings for Aduana library',
       url              = 'https://github.com/scrapinghub/aduana',
       author           = 'Aduana developers',
