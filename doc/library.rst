@@ -4,10 +4,20 @@ C Library
 This section is aimed at developers that want to understand the
 architecture of the library, in order to extend it.
 
+The library can be compiled and installed independently of the python
+bindings. To build and install::
+
+    cd lib
+    mkdir debug
+    cd debug
+    cmake .. -DCMAKE_BUILD_TYPE=Debug
+    make && sudo make install
+
 When trying to understand some code I like to start with the data
 structures that make the inputs and the outputs of the
 code. :cpp:class:`CrawledPage` is the input of Aduana and the best
 place to start.
+
 
 CrawledPage
 -----------
