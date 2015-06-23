@@ -21,7 +21,6 @@ setup(name             = 'aduana',
           'talons',
           'requests',
           'pyOpenSSL',
-          'breathe',
           'cffi'
       ],
       cffi_modules     = ['build_wrapper.py:ffi'],
