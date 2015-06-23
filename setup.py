@@ -14,15 +14,15 @@ setup(name             = 'aduana',
           'aduana/bin/aduana-server.py', 
           'aduana/bin/aduana-server-cert.py'
       ],
-      setup_requires   = ['cffi == 1.1.2'],
+      setup_requires   = ['cffi'],
       install_requires = [
-          'gevent==1.0.2',
-          'falcon==0.3.0',
-          'talons==0.3',
-          'requests==2.5.3',
-          'pyOpenSSL==0.14',
-          'breathe==4.0.0',
-          'cffi==1.1.2'
+          'gevent',
+          'falcon',
+          'talons',
+          'requests',
+          'pyOpenSSL',
+          'breathe',
+          'cffi'
       ],
       cffi_modules     = ['build_wrapper.py:ffi'],
       keywords         = ['crawler', 'frontier', 'scrapy', 'web', 'requests'],
