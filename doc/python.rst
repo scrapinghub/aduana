@@ -18,8 +18,8 @@ Apart from the python module it will also install two scripts:
 - aduana-server.py
 - aduana-server-cert.py
 
-These scripts are to be used when using the
-`Distributed spider backend`_.
+These scripts are to be used when using the `Distributed spider backend`_.
+
 
 Using Scrapy/Frontera with Aduana
 ---------------------------------
@@ -103,7 +103,10 @@ Distributed spider backend
 --------------------------
 
 This backend allows to use several spiders simultaneously, maybe at
-different computers to improve CPU and network performance.
+different computers to improve CPU and network performance. It works
+by having a central server and several spiders connecting to it
+through a REST api.
+
 The first thing you need to do is launch the server::
 
     aduana-server.py --help
@@ -196,3 +199,78 @@ Additionally, the following setting are also used by this backend
 
     Path to server certificate. If this option is set it will try to
     connecto to the server using HTTPS. Default ``None``.
+
+WebBackend REST API
+~~~~~~~~~~~~~~~~~~~
+There are two messages exchanged between the spiders and the server.
+
+- Crawled
+
+  When a spider crawls a page it sends a POST message to
+  ``/crawled``. The body is a json dictionary with the following fields:
+
+    - url: The URL of the crawled page, ASCII encoded. This is the
+      only mandatory field.
+    - score: a floating point number. If omited defaults to zero.
+    - links: a list links. Each element of the links is a pair made
+      from link URL and link score.
+
+  En example message::
+
+        { "url"  : "http://scrapinghub.com",
+          "score": 0.5,
+          "links": [["http://scrapinghub.com/professional-services/", 1.0],
+                    ["http://scrapinghub.com/platform/", 0.5],
+                    ["http://scrapinghub.com/pricing/", 0.8],
+                    ["http://scrapinghub.com/clients/", 0.9]] }
+
+- Request
+
+  When the spider needs to know which pages to crawl next it sends a
+  GET message to ``/request``. The query strings accepts an optional
+  parameter ``n`` with the maximum number of URLs. If not specified
+  the default value specified in the server settings will be used. The
+  response will be a json encoded list of URLs.
+  Example (``pip install httpie``)::
+
+      $ http --auth test:123 --verify=no https://localhost:8000/request n==3
+
+      HTTP/1.1 200 OK
+      Date: Tue, 23 Jun 2015 08:40:46 GMT
+      content-length: 120
+      content-type: application/json
+
+      [
+          "http://www.reddit.com/r/MachineLearning/",
+          "http://www.datanami.com/",
+          "http://venturebeat.com/tag/machine-learning/"
+      ]
+
+Running the examples
+--------------------
+
+To run the single spider example just go to the example directory,
+install the requirements and run the crawl::
+
+    cd example
+    pip install -r requirements.txt
+    scrapy crawl example
+
+To run the distributed spider example we need to dance a little more:
+
+1. Go to the example directory::
+
+    cd example
+
+
+2. Generate a server certificate::
+
+    aduana-server-cert.py
+
+3. Launch the server::
+
+    aduana-server.py server-config.py
+
+4. Go to the example directory in another terminal and then::
+
+    scrapy crawl -s FRONTERA_SETTINGS=example.frontera.web_settings example
