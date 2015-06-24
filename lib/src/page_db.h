@@ -140,16 +140,17 @@ crawled_page_get_link(const CrawledPage *cp, size_t i);
  * no public constructors/destructors available.
  */
 typedef struct {
-     char *url;                   /**< A copy of either @ref CrawledPage::url or
-                                   * @ref CrawledPage::links[i] */
-     uint64_t linked_from;        /**< The page that first linked this one */
-     double first_crawl;          /**< First time this page was crawled */
-     double last_crawl;           /**< Last time this page was crawled */
-     size_t n_changes;            /**< Number of content changes detected between first and last crawl */
-     size_t n_crawls;             /**< Number of times this page has been crawled. Can be zero if it has been observed just as a link*/
-     float score;                 /**< A copy of the same field at the last crawl */
-     size_t content_hash_length;  /**< Number of bytes in @ref PageInfo::content_hash */
-     char *content_hash;          /**< Byte sequence with the hash of the last crawl */
+     char *url;                     /**< A copy of either @ref CrawledPage::url or
+                                     * @ref CrawledPage::links[i] */
+     uint64_t linked_from;          /**< The page that first linked this one */
+     uint64_t depth;                /**< How many steps did we take to reach this page */
+     double first_crawl;            /**< First time this page was crawled */
+     double last_crawl;             /**< Last time this page was crawled */
+     uint64_t n_changes;            /**< Number of content changes detected between first and last crawl */
+     uint64_t n_crawls;             /**< Number of times this page has been crawled. Can be zero if it has been observed just as a link*/
+     float score;                   /**< A copy of the same field at the last crawl */
+     uint64_t content_hash_length;  /**< Number of bytes in @ref PageInfo::content_hash */
+     char *content_hash;            /**< Byte sequence with the hash of the last crawl */
 } PageInfo;
 
 /** Write printed representation of PageInfo.

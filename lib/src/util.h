@@ -139,6 +139,9 @@ make_dir(const char *path);
  * @{
  */
 
+/** Maximum number of chars necessary to represent a compressed varint */
+#define MAX_VARINT_SIZE ((10 + sizeof(char) - 1)/sizeof(char))
+
 /** Encode unsigned 64bit integer using varint encoding.
  *
  * @param n Number to encode

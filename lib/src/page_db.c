@@ -194,7 +194,10 @@ page_info_print(const PageInfo *pi, char *out) {
  * @return A pointer to the new structure or NULL if failure
  */
 static PageInfo *
-page_info_new_link(const char *url, uint64_t linked_from, float score) {
+page_info_new_link(const char *url,
+                   uint64_t linked_from,
+                   uint64_t depth,
+                   float score) {
      PageInfo *pi = calloc(1, sizeof(*pi));
      if (!pi)
           return 0;
@@ -206,6 +209,7 @@ page_info_new_link(const char *url, uint64_t linked_from, float score) {
 
      pi->score = score;
      pi->linked_from = linked_from;
+     pi->depth = depth;
      return pi;
 }
 
@@ -215,7 +219,7 @@ page_info_new_link(const char *url, uint64_t linked_from, float score) {
  */
 static PageInfo *
 page_info_new_crawled(const CrawledPage *cp) {
-     PageInfo *pi = page_info_new_link(cp->url, 0, cp->score);
+     PageInfo *pi = page_info_new_link(cp->url, 0, 0, cp->score);
      if (!pi)
           return 0;
 
@@ -298,9 +302,16 @@ page_info_dump(const PageInfo *pi, MDB_val *val) {
                content_hash        = NULL
      */
 
+     // TODO: store the following fields using varint compression:
+     //    - n_crawls
+     //    - n_changes
+     //    - content_hash_length
+     //    - depth
+
      // necessary size except for the URL, which we don't know yet how much is going
      // to cost storing
-     val->mv_size = sizeof(pi->linked_from) + sizeof(pi->score) + sizeof(pi->n_crawls);
+     val->mv_size = sizeof(pi->linked_from) +
+          sizeof(pi->score) + sizeof(pi->n_crawls) + sizeof(pi->depth);
      if (pi->n_crawls > 0) {
           val->mv_size += sizeof(pi->first_crawl) +
                pi->content_hash_length + sizeof(pi->content_hash_length);
@@ -327,6 +338,7 @@ page_info_dump(const PageInfo *pi, MDB_val *val) {
 #define PAGE_INFO_WRITE(x) for (j=0, s=(char*)&(x); j<sizeof(x); data[i++] = s[j++])
      PAGE_INFO_WRITE(pi->score);
      PAGE_INFO_WRITE(pi->linked_from);
+     PAGE_INFO_WRITE(pi->depth);
      PAGE_INFO_WRITE(pi->n_crawls);
      if (pi->n_crawls > 0) {
           PAGE_INFO_WRITE(pi->first_crawl);
@@ -386,6 +398,7 @@ page_info_load(const MDB_val *val) {
 
      PAGE_INFO_READ(pi->score);
      PAGE_INFO_READ(pi->linked_from);
+     PAGE_INFO_READ(pi->depth);
      PAGE_INFO_READ(pi->n_crawls);
      if (pi->n_crawls > 0) {
           PAGE_INFO_READ(pi->first_crawl);
@@ -733,13 +746,15 @@ static int
 page_db_add_link_page_info(MDB_cursor *cur,
                            MDB_val *key,
                            uint64_t linked_from,
+                           uint64_t depth,
                            const LinkInfo *link,
                            PageInfo **page_info,
                            int *mdb_error) {
      MDB_val val;
      int mdb_rc = 0;
 
-     PageInfo *pi = *page_info = page_info_new_link(link->url, linked_from, link->score);
+     PageInfo *pi = *page_info =
+          page_info_new_link(link->url, linked_from, depth, link->score);
      if (!pi)
           goto on_error;
 
@@ -821,6 +836,8 @@ page_db_add(PageDB *db, const CrawledPage *page, PageInfoList **page_info_list) 
           error = "adding/updating page info";
           goto on_error;
      }
+     uint64_t link_depth = pi->depth + 1;
+
      if (page_info_list) {
           *page_info_list = page_info_list_new(pi, cp_hash);
           if (!*page_info_list) {
@@ -873,7 +890,13 @@ page_db_add(PageDB *db, const CrawledPage *page, PageInfoList **page_info_list) 
                *id = n_pages++;
                if (link) {
                     if (page_db_add_link_page_info(
-                             cur_hash2info, &key, cp_hash, link, &pi, &mdb_rc) != 0) {
+                             cur_hash2info,
+                             &key,
+                             cp_hash,
+                             link_depth,
+                             link,
+                             &pi,
+                             &mdb_rc) != 0) {
                          error = "adding/updating link info";
                          goto on_error;
                     }
@@ -916,9 +939,8 @@ page_db_add(PageDB *db, const CrawledPage *page, PageInfoList **page_info_list) 
      key.mv_data = diff_id; // remember that diff_id[0] is the id of the
                             // crawled page
      // the links are stored as deltas starting from the 'from' page, encoded
-     // using varint. The '10' is because an 8 byte number can grow up to 10
-     // bytes in size if encoded.
-     uint8_t *buf = val.mv_data = malloc(10*(n_links + 1));
+     // using varint.
+     uint8_t *buf = val.mv_data = malloc(MAX_VARINT_SIZE*(n_links + 1));
      if (!buf) {
           error = "allocating memory to store links";
           goto on_error;
@@ -1249,8 +1271,9 @@ page_db_info_dump(PageDB *db, FILE *output) {
           fprintf(output, "%s ", pi->url);
           fprintf(output, "%.1f ", pi->first_crawl);
           fprintf(output, "%.1f ", pi->last_crawl);
-          fprintf(output, "%zu ", pi->n_changes);
-          fprintf(output, "%zu ", pi->n_crawls);
+          fprintf(output, "%"PRIu64" ", pi->n_changes);
+          fprintf(output, "%"PRIu64" ", pi->n_crawls);
+          fprintf(output, "%"PRIu64" ", pi->depth);
           fprintf(output, "%.3e\n", pi->score);
           page_info_delete(pi);
 
