@@ -51,9 +51,10 @@ main(int argc, char **argv) {
      page_db_set_persist(page_db, 1);
 
      int dump_error = 0;
-     if (links && (page_db_links_dump(page_db, output) != 0))
-          dump_error = 1;
-     else if (page_db_info_dump(page_db, output) != 0)
+     if (links) {
+          if (page_db_links_dump(page_db, output) != 0)
+               dump_error = 1;
+     } else if (page_db_info_dump(page_db, output) != 0)
           dump_error = 1;
 
      if (dump_error) {
