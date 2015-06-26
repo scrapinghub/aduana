@@ -20,4 +20,4 @@ script:
   - ./test
   - cd ..
 
-  - tox
+  - travis_wait tox
