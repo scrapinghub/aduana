@@ -135,6 +135,8 @@ typedef struct {
      float max_soft_domain_crawl_rate;
      /** Maximum crawls per second per domain */
      float max_hard_domain_crawl_rate;
+     /** Maximum crawl depth */
+     uint64_t max_crawl_depth;
 } BFScheduler;
 
 
@@ -194,7 +196,7 @@ bf_scheduler_update_start(BFScheduler *sch);
 BFSchedulerError
 bf_scheduler_update_stop(BFScheduler *sch);
 
-/** Set persist option for scheduler */
+/** Set @ref BFScheduler::persist option for scheduler */
 void
 bf_scheduler_set_persist(BFScheduler *sch, int value);
 
@@ -204,6 +206,10 @@ BFSchedulerError
 bf_scheduler_set_max_domain_crawl_rate(BFScheduler *sch,
                                        float max_soft_crawl_rate,
                                        float max_hard_crawl_rate);
+
+/** Set @ref BFScheduler::max_crawl_depth option for scheduler */
+void
+bf_scheduler_set_max_crawl_depth(BFScheduler *sch, uint64_t value);
 
 /// @}
 

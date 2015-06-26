@@ -114,6 +114,7 @@ bf_scheduler_new(BFScheduler **sch, PageDB *db) {
      p->persist = BF_SCHEDULER_DEFAULT_PERSIST;
      p->max_soft_domain_crawl_rate = -1.0;
      p->max_hard_domain_crawl_rate = -1.0;
+     p->max_crawl_depth = 0;
 
      if (!(p->path = concat(db->path, "bfs", '_')))
           error = "building scheduler path";
@@ -229,7 +230,9 @@ bf_scheduler_add(BFScheduler *sch, const CrawledPage *page) {
 
      for (PageInfoList *node = pil; node != 0; node=node->next) {
           PageInfo *pi = node->page_info;
-          if (pi->n_crawls == 0) {
+          if ((pi->n_crawls == 0) &&
+              ((sch->max_crawl_depth == 0) ||
+               (pi->depth <= sch->max_crawl_depth))) {
                ScheduleKey se = {
                     .score = 0.0,
                     .hash = node->hash
@@ -293,6 +296,13 @@ bf_scheduler_change_score(BFScheduler *sch,
                error2 = mdb_strerror(mdb_rc);
                goto on_error;
           }
+          // Add new key
+          se.score = score_new;
+          if ((mdb_rc = mdb_cursor_put(cur, &key, &val, 0)) != 0) {
+               error1 = "adding updated Hash/Index item";
+               error2 = mdb_strerror(mdb_rc);
+               goto on_error;
+          }
           break;
      case MDB_NOTFOUND:
           // OK, do nothing
@@ -302,13 +312,6 @@ bf_scheduler_change_score(BFScheduler *sch,
           error2 = mdb_strerror(mdb_rc);
           goto on_error;
           break;
-     }
-     // Add new key
-     se.score = score_new;
-     if ((mdb_rc = mdb_cursor_put(cur, &key, &val, 0)) != 0) {
-          error1 = "adding updated Hash/Index item";
-          error2 = mdb_strerror(mdb_rc);
-          goto on_error;
      }
      return 0;
 
@@ -712,6 +715,11 @@ on_error:
 void
 bf_scheduler_set_persist(BFScheduler *sch, int value) {
      sch->persist = value;
+}
+
+void
+bf_scheduler_set_max_crawl_depth(BFScheduler *sch, uint64_t value) {
+     sch->max_crawl_depth = value;
 }
 
 BFSchedulerError

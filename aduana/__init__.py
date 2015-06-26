@@ -247,6 +247,9 @@ class BFScheduler(object):
     def set_crawl_rate(self, soft_rate, hard_rate):
         self._c_aduana.bf_scheduler_set_max_domain_crawl_rate(self._pBF[0], soft_rate, hard_rate)
 
+    def set_max_crawl_depth(self, max_crawl_depth=0):
+        self._c_aduana.bf_scheduler_set_max_crawl_depth(self._pBF[0], max_crawl_depth)
+
 if __name__ == '__main__':
     db = PageDB('./test_python_bindings')
     scorer = PageRankScorer(db)

@@ -17,6 +17,7 @@ class Backend(frontera.Backend):
                  use_scores=False,
                  soft_crawl_limit=0.25,
                  hard_crawl_limit=100,
+                 max_crawl_depth=None,
                  **kwargs):
         self.logger = logger
         if db:
@@ -43,6 +44,8 @@ class Backend(frontera.Backend):
             persist=persist
         )
         self._scheduler.set_crawl_rate(soft_crawl_limit, hard_crawl_limit)
+        if max_crawl_depth:
+            self._scheduler.set_max_crawl_depth(max_crawl_depth)
 
         self._n_seeds = 0
 
@@ -68,6 +71,7 @@ class Backend(frontera.Backend):
             scorer_class=scorer_class,
             soft_crawl_limit=manager.settings.get('SOFT_CRAWL_LIMIT', 0.25),
             hard_crawl_limit=manager.settings.get('HARD_CRAWL_LIMIT', 100.0),
+            max_crawl_depth=manager.settings.get('MAX_CRAWL_DEPTH', None),
             page_rank_damping=manager.settings.get('PAGE_RANK_DAMPING', 0.85)
         )
 

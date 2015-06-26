@@ -778,6 +778,17 @@ on_error:
      return -1;
 }
 
+/* How new PageInfo are created:
+      page_db_add ---------------> page_db_add_crawled_page_info
+            |                                 |
+            |                                 |
+            v                                 v
+      page_db_add_link_page_info      page_info_new_crawled
+            |                                 |
+            |                                 |
+            |                                 |
+            +--------> page_info_new_link <---+
+*/
 PageDBError
 page_db_add(PageDB *db, const CrawledPage *page, PageInfoList **page_info_list) {
      // check if page should be expanded
