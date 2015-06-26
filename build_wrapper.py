@@ -42,7 +42,6 @@ aduana_compile_args = [
     '-std=c99',
     '-m64',
     '-msse2',
-    '-O3',
     '-pthread'
 ]
 
@@ -262,6 +261,7 @@ ffi.cdef(
          int persist;
          float max_soft_domain_crawl_rate;
          float max_hard_domain_crawl_rate;
+         uint64_t max_crawl_depth;
     } BFScheduler;
 
     BFSchedulerError
@@ -289,6 +289,8 @@ ffi.cdef(
     bf_scheduler_set_max_domain_crawl_rate(BFScheduler *sch,
                                            float max_soft_crawl_rate,
                                            float max_hard_crawl_rate);
+    void
+    bf_scheduler_set_max_crawl_depth(BFScheduler *sch, uint64_t value);
     """
 )
 
