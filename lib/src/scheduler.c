@@ -19,6 +19,23 @@
 #include "page_db.h"
 #include "scheduler.h"
 
+int
+schedule_entry_mdb_cmp_desc(const MDB_val *a, const MDB_val *b) {
+     ScheduleKey *se_a = (ScheduleKey*)a->mv_data;
+     ScheduleKey *se_b = (ScheduleKey*)b->mv_data;
+     return
+          se_a->score < se_b->score? +1:
+          se_a->score > se_b->score? -1:
+          // equal scores, order by hash
+          se_a->hash  < se_b->hash? -1:
+          se_a->hash  > se_b->hash? +1: 0;
+}
+
+int
+schedule_entry_mdb_cmp_asc(const MDB_val *a, const MDB_val *b) {
+     return -schedule_entry_mdb_cmp_desc(a, b);
+}
+
 PageRequest*
 page_request_new(size_t n_urls) {
      PageRequest *req = malloc(sizeof(*req));

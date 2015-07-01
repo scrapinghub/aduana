@@ -29,42 +29,6 @@
 #include "page_rank_scorer.h"
 #include "hits_scorer.h"
 
-/** Structure used as key inside the schedule database.
- *
- * In the schedule we want to keep an ordered heap of hashes, where we can pop
- * the highest scores whenever we want. In this sense it would have been more
- * natural to use as keys the scores (a single float) and the page hashes as the
- * values.  However, the scores may change as the page database changes and we
- * want a fast method to change the score associated to a hash. In particular we
- * want to make the change:
- *
- *   (score_old, hash) --> (score_new, hash)
- *
- * Since there can be lots of pages with the same score we move the hash into
- * the key, so that finding the previous (score_old, hash) can be done very fast
- */
-typedef struct {
-     float score;
-     uint64_t hash;
-} ScheduleKey;
-
-/** Order keys from higher to lower
- *
- * First by score (descending) and then by hash.
- * */
-static int
-schedule_entry_mdb_cmp(const MDB_val *a, const MDB_val *b) {
-     ScheduleKey *se_a = (ScheduleKey*)a->mv_data;
-     ScheduleKey *se_b = (ScheduleKey*)b->mv_data;
-     return
-          se_a->score < se_b->score? +1:
-          se_a->score > se_b->score? -1:
-          // equal scores, order by hash
-          se_a->hash  < se_b->hash? -1:
-          se_a->hash  > se_b->hash? +1: 0;
-}
-
-
 static void
 bf_scheduler_set_error(BFScheduler *sch, int code, const char *message) {
      error_set(sch->error, code, message);
@@ -164,7 +128,7 @@ bf_scheduler_open_cursor(MDB_txn *txn, MDB_cursor **cursor) {
      MDB_dbi dbi;
      int mdb_rc =
           mdb_dbi_open(txn, "schedule", MDB_CREATE, &dbi) ||
-          mdb_set_compare(txn, dbi, schedule_entry_mdb_cmp) ||
+          mdb_set_compare(txn, dbi, schedule_entry_mdb_cmp_desc) ||
           mdb_cursor_open(txn, dbi, cursor);
 
      if (mdb_rc != 0)
@@ -175,7 +139,7 @@ bf_scheduler_open_cursor(MDB_txn *txn, MDB_cursor **cursor) {
 
 static BFSchedulerError
 bf_scheduler_expand(BFScheduler *sch) {
-     if (txn_manager_expand(sch->txn_manager) != 0) {
+     if (txn_manager_expand(sch->txn_manager, 0) != 0) {
           bf_scheduler_set_error(sch, bf_scheduler_error_internal, __func__);
           bf_scheduler_add_error(sch, sch->txn_manager->error->message);
      }

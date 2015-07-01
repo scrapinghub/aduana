@@ -22,7 +22,8 @@ aduana_src = [
         'page_rank_scorer.c',
         'hits_scorer.c',
         'txn_manager.c',
-        'domain_temp.c'
+        'domain_temp.c',
+        'freq_scheduler.c',
     ]]
 
 if platform.system() == 'Windows':

@@ -567,7 +567,7 @@ page_db_add_error(PageDB *db, const char *message) {
  */
 static PageDBError
 page_db_expand(PageDB *db) {
-     if (txn_manager_expand(db->txn_manager) != 0) {
+     if (txn_manager_expand(db->txn_manager, 0) != 0) {
           page_db_set_error(db, page_db_error_internal, __func__);
           page_db_add_error(db, db->txn_manager->error->message);
      }
@@ -1027,7 +1027,6 @@ page_db_get_info(PageDB *db, uint64_t hash, PageInfo **pi) {
                break;
           case MDB_NOTFOUND:
                *pi = 0;
-               return 0;
                break;
           default:
                error = "retrieving val from hash2info";

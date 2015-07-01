@@ -176,7 +176,7 @@ txn_manager_delete(TxnManager *tm);
  * blocked until it finishes.
  */
 TxnManagerError
-txn_manager_expand(TxnManager *tm);
+txn_manager_expand(TxnManager *tm, size_t size);
 
 /// @}
 #endif // __TXN_MANAGER_H__
