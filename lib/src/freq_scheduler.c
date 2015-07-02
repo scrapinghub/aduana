@@ -46,7 +46,7 @@ freq_scheduler_new(FreqScheduler **sch, PageDB *db) {
 
      p->page_db = db;
      p->persist = 0;
-
+     p->margin = -1.0; // disabled
      // create directory if not present yet
      char *error = 0;
      if (!(p->path = concat(db->path, "freqs", '_')))
@@ -199,7 +199,8 @@ freq_scheduler_request(FreqScheduler *sch,
 	  goto on_error;
      }
 
-     while (req->n_urls < max_requests) {
+     int interrupt_requests = 0;
+     while ((req->n_urls < max_requests) && !interrupt_requests) {
 	  MDB_val key;
 	  MDB_val val;
 	  ScheduleKey sk;
@@ -209,8 +210,32 @@ freq_scheduler_request(FreqScheduler *sch,
 	  case 0:
 	       sk = *(ScheduleKey*)key.mv_data;
 	       freq = *(float*)val.mv_data;
-	       val.mv_data = &freq;
+
+	       PageInfo *pi = 0;
+	       if (page_db_get_info(sch->page_db, sk.hash, &pi) != 0) {
+		    error1 = "retrieving PageInfo from PageDB";
+		    error2 = sch->page_db->error->message;
+		    goto on_error;
+	       }
+
+	       // check crawl rate
+	       if (pi) {
+		    if (sch->margin >= 0) {
+			 double elapsed = difftime(time(0), 0) - pi->last_crawl;
+			 if (elapsed < 1.0/(freq*(1.0 + sch->margin)))
+			      interrupt_requests = 1;
+		    }
+		    if (!interrupt_requests &&
+			(page_request_add_url(req, pi->url) != 0)) {
+			 error1 = "adding url to request";
+			 goto on_error;
+		    }
+		    page_info_delete(pi);
+	       }
+
 	       sk.score += 1.0/freq;
+
+	       val.mv_data = &freq;
 	       key.mv_data = &sk;
 	       if ((mdb_rc = mdb_cursor_del(cur, 0) != 0) ||
 		   (mdb_rc = mdb_cursor_put(cur, &key, &val, 0) != 0)) {
@@ -218,22 +243,10 @@ freq_scheduler_request(FreqScheduler *sch,
 		    error2 = mdb_strerror(mdb_rc);
 		    goto on_error;
 	       }
-	       PageInfo *pi = 0;
-	       if (page_db_get_info(sch->page_db, sk.hash, &pi) != 0) {
-		    error1 = "retrieving PageInfo from PageDB";
-		    error2 = sch->page_db->error->message;
-		    goto on_error;
-	       }
-	       // TODO: maybe if pi is null we should raise an error
-	       if (pi && (page_request_add_url(req, pi->url) != 0)) {
-		    error1 = "adding url to request";
-		    goto on_error;
-	       }
-	       page_info_delete(pi);
-
 	       break;
 
 	  case MDB_NOTFOUND: // no more pages left
+	       interrupt_requests = 1;
 	       break;
 	  default:
 	       error1 = "getting head of schedule";

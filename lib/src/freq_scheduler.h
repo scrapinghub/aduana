@@ -32,6 +32,14 @@ typedef struct {
 // -----------------------------------------------------------------------------
      /** If true, do not delete files after deleting object*/
      int persist;
+     /** If positive, do not crawl above this margin frequency.
+      *
+      * More exactly, pause crawl (do not return more requests) if:
+      *                                                  1
+      *     current_time - last_crawl_time < --------------------------
+      *                                      frequency * (1.0 + margin)
+      */
+     float margin;
 } FreqScheduler;
 
 FreqSchedulerError
