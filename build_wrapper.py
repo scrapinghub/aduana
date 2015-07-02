@@ -24,6 +24,7 @@ aduana_src = [
         'txn_manager.c',
         'domain_temp.c',
         'freq_scheduler.c',
+        'freq_algo.c'
     ]]
 
 if platform.system() == 'Windows':
@@ -64,6 +65,8 @@ ffi.set_source(
     #include "scheduler.h"
     #include "txn_manager.h"
     #include "util.h"
+    #include "freq_scheduler.h"
+    #include "freq_algo.h"
     ''',
     sources            = aduana_src,
     include_dirs       = aduana_include,

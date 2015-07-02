@@ -47,6 +47,7 @@ set(ADUANA_SRC
   src/txn_manager.c
   src/domain_temp.c
   src/freq_scheduler.c
+  src/freq_algo.c
 
   $<TARGET_OBJECTS:lmdb>
   $<TARGET_OBJECTS:xxhash>
