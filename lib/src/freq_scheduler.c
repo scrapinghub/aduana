@@ -108,7 +108,87 @@ freq_scheduler_open_cursor(MDB_txn *txn, MDB_cursor **cursor) {
 }
 
 FreqSchedulerError
-freq_scheduler_load(FreqScheduler *sch, MMapArray *freqs) {
+freq_scheduler_load_simple(FreqScheduler *sch,
+			   float freq_default,
+			   float freq_scale) {
+     char *error1 = 0;
+     char *error2 = 0;
+
+     HashInfoStream *st;
+     if (hashinfo_stream_new(&st, sch->page_db) != 0) {
+	  error1 = "creating stream";
+	  error2 = st? sch->page_db->error->message: "NULL";
+	  goto on_error;
+     }
+
+     MDB_txn *txn = 0;
+     if (txn_manager_begin(sch->txn_manager, 0, &txn) != 0) {
+	  error1 = "starting transaction";
+	  error2 = sch->txn_manager->error->message;
+	  goto on_error;
+     }
+
+     MDB_cursor *cur = 0;
+     int mdb_rc = freq_scheduler_open_cursor(txn, &cur);
+     if (mdb_rc != 0) {
+	  error1 = "opening cursor";
+	  error2 = mdb_strerror(mdb_rc);
+	  goto on_error;
+     }
+
+     StreamState ss;
+     uint64_t hash;
+     PageInfo *pi;
+
+     while ((ss = hashinfo_stream_next(st, &hash, &pi)) == stream_state_next) {
+	  ScheduleKey sk = {
+	       .score = 0,
+	       .hash  = hash
+	  };
+	  MDB_val key = {
+	       .mv_size = sizeof(sk),
+	       .mv_data = &sk,
+	  };
+	  float freq = freq_scale>0? freq_scale*page_info_rate(pi): freq_default;
+	  MDB_val val = {
+	       .mv_size = sizeof(float),
+	       .mv_data = &freq,
+	  };
+	  if ((mdb_rc = mdb_cursor_put(cur, &key, &val, 0)) != 0) {
+	       error1 = "adding page to schedule";
+	       error2 = mdb_strerror(mdb_rc);
+	       goto on_error;
+	  }
+
+	  page_info_delete(pi);
+     }
+     if (ss != stream_state_end) {
+	  error1 = "incorrect stream state";
+	  error2 = 0;
+	  hashinfo_stream_delete(st);
+	  goto on_error;
+     }
+     hashinfo_stream_delete(st);
+
+     if (txn_manager_commit(sch->txn_manager, txn) != 0) {
+	  error1 = "commiting schedule transaction";
+	  error2 = sch->txn_manager->error->message;
+	  goto on_error;
+     }
+
+     return sch->error->code;
+
+on_error:
+     if (txn != 0)
+	  txn_manager_abort(sch->txn_manager, txn);
+     freq_scheduler_set_error(sch, freq_scheduler_error_internal, __func__);
+     freq_scheduler_add_error(sch, error1);
+     freq_scheduler_add_error(sch, error2);
+     return sch->error->code;
+}
+
+FreqSchedulerError
+freq_scheduler_load_mmap(FreqScheduler *sch, MMapArray *freqs) {
      char *error1 = 0;
      char *error2 = 0;
      MDB_txn *txn = 0;
