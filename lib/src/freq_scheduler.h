@@ -50,8 +50,8 @@ freq_scheduler_load_mmap(FreqScheduler *sch, MMapArray *freqs);
 
 FreqSchedulerError
 freq_scheduler_request(FreqScheduler *sch,
-		       size_t max_requests,
-		       PageRequest **request);
+                       size_t max_requests,
+                       PageRequest **request);
 
 FreqSchedulerError
 freq_scheduler_add(FreqScheduler *sch, const CrawledPage *page);

@@ -22,7 +22,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#if defined(_WIN32) 
+#if defined(_WIN32)
 #include "mman.h"
 #else
 #include <sys/mman.h>

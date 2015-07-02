@@ -21,7 +21,7 @@
 #include <string.h>
 #include <time.h>
 
-#if defined(_WIN32) 
+#if defined(_WIN32)
 #include "mman.h"
 #else
 #include <sys/mman.h>
