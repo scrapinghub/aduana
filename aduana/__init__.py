@@ -194,6 +194,32 @@ class HitsScorer(object):
 ########################################################################
 # Scheduler Wrappers
 ########################################################################
+class SchedulerCore(object):
+    def __init__(self, scheduler, scheduler_add, scheduler_request):
+        self._c_aduana = C_ADUANA
+
+        self._sch = scheduler
+        self._scheduler_add = scheduler_add
+        self._scheduler_request = scheduler_request
+
+    def add(self, crawled_page):
+        # better to signal this as an error here than in bf_scheduler_add
+        if not isinstance(crawled_page, CrawledPage):
+            raise PageDBException("argument to function must be a CrawledPage instance")
+
+        ret = self._scheduler_add(self._sch[0], crawled_page._crawled_page)
+        if ret != 0:
+            raise PageDBException.from_error(self._sch[0].error)
+
+    def requests(self, n_pages):
+        pReq = ffi.new('PageRequest **')
+        ret = self._scheduler_request(self._sch[0], n_pages, pReq)
+        if ret != 0:
+            raise PageDBException.from_error(self._sch[0].error)
+        reqs = [ffi.string(pReq[0].urls[i]) for i in xrange(pReq[0].n_urls)]
+        self._c_aduana.page_request_delete(pReq[0])
+        return reqs
+
 class BFScheduler(object):
     def __init__(self, page_db, persist=0, scorer=None):
         # save to make sure lib is available at destruction time
@@ -202,53 +228,83 @@ class BFScheduler(object):
         self._page_db = page_db
         self._page_db.persist = persist
 
-        self._pBF = ffi.new('BFScheduler **')
+        self._sch = ffi.new('BFScheduler **')
+        self._core = SchedulerCore(
+            self._sch,
+            self._c_aduana.bf_scheduler_add,
+            self._c_aduana.bf_scheduler_request
+        )
 
-        ret = self._c_aduana.bf_scheduler_new(self._pBF, self._page_db._page_db[0])
+        ret = self._c_aduana.bf_scheduler_new(self._sch, self._page_db._page_db[0])
         if ret != 0:
-            if self._pBF:
-                raise PageDBException.from_error(self._pBF[0].error)
+            if self._sch:
+                raise PageDBException.from_error(self._sch[0].error)
             else:
                 raise PageDBException("Error inside bf_scheduler_new", ret)
 
-        self._c_aduana.bf_scheduler_set_persist(self._pBF[0], persist)
+        self._c_aduana.bf_scheduler_set_persist(self._sch[0], persist)
 
         if scorer:
             self._scorer = scorer
-            self._scorer.setup(self._pBF[0].scorer)
-            ret = self._c_aduana.bf_scheduler_update_start(self._pBF[0])
+            self._scorer.setup(self._sch[0].scorer)
+            ret = self._c_aduana.bf_scheduler_update_start(self._sch[0])
             if ret != 0:
-                raise PageDBException.from_error(self._pBF[0].error)
+                raise PageDBException.from_error(self._sch[0].error)
 
     def __del__(self):
-        ret = self._c_aduana.bf_scheduler_update_stop(self._pBF[0])
+        ret = self._c_aduana.bf_scheduler_update_stop(self._sch[0])
         if ret != 0:
-            raise PageDBException.from_error(self._pBF[0].error)
-        self._c_aduana.bf_scheduler_delete(self._pBF[0])
+            raise PageDBException.from_error(self._sch[0].error)
+        self._c_aduana.bf_scheduler_delete(self._sch[0])
 
     def add(self, crawled_page):
-        # better to signal this as an error here than in bf_scheduler_add
-        if not isinstance(crawled_page, CrawledPage):
-            raise PageDBException("argument to function must be a CrawledPage instance")
-
-        ret = self._c_aduana.bf_scheduler_add(self._pBF[0], crawled_page._crawled_page)
-        if ret != 0:
-            raise PageDBException.from_error(self._pBF[0].error)
+        return self._core.add(crawled_page)
 
     def requests(self, n_pages):
-        pReq = ffi.new('PageRequest **')
-        ret = self._c_aduana.bf_scheduler_request(self._pBF[0], n_pages, pReq)
-        if ret != 0:
-            raise PageDBException.from_error(self._pBF[0].error)
-        reqs = [ffi.string(pReq[0].urls[i]) for i in xrange(pReq[0].n_urls)]
-        self._c_aduana.page_request_delete(pReq[0])
-        return reqs
+        return self._core.requests(n_pages)
 
     def set_crawl_rate(self, soft_rate, hard_rate):
-        self._c_aduana.bf_scheduler_set_max_domain_crawl_rate(self._pBF[0], soft_rate, hard_rate)
+        self._c_aduana.bf_scheduler_set_max_domain_crawl_rate(self._sch[0], soft_rate, hard_rate)
 
     def set_max_crawl_depth(self, max_crawl_depth=0):
-        self._c_aduana.bf_scheduler_set_max_crawl_depth(self._pBF[0], max_crawl_depth)
+        self._c_aduana.bf_scheduler_set_max_crawl_depth(self._sch[0], max_crawl_depth)
+
+class FreqScheduler(object):
+    def __init__(self, page_db, persist=0):
+        # save to make sure lib is available at destruction time
+        self._c_aduana = C_ADUANA
+
+        self._page_db = page_db
+        self._page_db.persist = persist
+
+        self._sch = ffi.new('FreqScheduler **')
+        self._core = SchedulerCore(
+            self._sch,
+            self._c_aduana.freq_scheduler_add,
+            self._c_aduana.freq_scheduler_request
+        )
+
+        ret = self._c_aduana.freq_scheduler_new(self._sch, self._page_db._page_db[0])
+        if ret != 0:
+            if self._sch:
+                raise PageDBException.from_error(self._sch[0].error)
+            else:
+                raise PageDBException("Error inside freq_scheduler_new", ret)
+
+        self._sch[0].persist = persist
+
+    def load_simple(self, freq_default=1.0, freq_scale=None):
+        self._c_aduana.freq_scheduler_load_simple(
+            self._sch[0], freq_default, freq_scale or -1.0)
+
+    def add(self, crawled_page):
+        return self._core.add(crawled_page)
+
+    def requests(self, n_pages):
+        return self._core.requests(n_pages)
+
+    def __del__(self):
+        self._c_aduana.freq_scheduler_delete(self._sch[0])
 
 if __name__ == '__main__':
     db = PageDB('./test_python_bindings')

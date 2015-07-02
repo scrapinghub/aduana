@@ -298,5 +298,53 @@ ffi.cdef(
     """
 )
 
+ffi.cdef(
+    """
+    typedef enum {
+         freq_scheduler_error_ok = 0,       /**< No error */
+         freq_scheduler_error_memory,       /**< Error allocating memory */
+         freq_scheduler_error_invalid_path, /**< File system error */
+         freq_scheduler_error_internal     /**< Unexpected error */
+    } FreqSchedulerError;
+
+    typedef struct {
+         char *path;
+         PageDB *page_db;
+         void *txn_manager;
+         void *error;
+         int persist;
+         float margin;
+    } FreqScheduler;
+
+    FreqSchedulerError
+    freq_scheduler_new(FreqScheduler **sch, PageDB *path);
+
+    FreqSchedulerError
+    freq_scheduler_load_simple(FreqScheduler *sch,
+                               float freq_default,
+                               float freq_scale);
+    FreqSchedulerError
+    freq_scheduler_load_mmap(FreqScheduler *sch, void *freqs);
+
+    FreqSchedulerError
+    freq_scheduler_request(FreqScheduler *sch,
+                           size_t max_requests,
+                           PageRequest **request);
+
+    FreqSchedulerError
+    freq_scheduler_add(FreqScheduler *sch, const CrawledPage *page);
+
+    void
+    freq_scheduler_delete(FreqScheduler *sch);
+    """
+)
+
+ffi.cdef(
+    """
+    int
+    freq_algo_simple(PageDB *db, void **freqs, const char *path, char **error_msg);
+    """
+)
+
 if __name__ == '__main__':
     ffi.compile()
