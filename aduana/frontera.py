@@ -51,18 +51,10 @@ class Backend(frontera.Backend):
 
     @classmethod
     def from_manager(cls, manager):
-        scorer = manager.settings.get('SCORER', None)
-        if scorer:
-            try:
-                scorer_class = getattr(aduana, scorer)
-            except AttributeError:
-                manager.logger.backend.warning(
-                    'Cannot load scorer class {0}. Using content scorer'.format(scorer))
-                scorer_class = None
-        else:
+        scorer_class = manager.settings.get('SCORER', None)
+        if scorer_class is None:
             manager.logger.backend.warning(
                 'No SCORER setting. Using default content scorer')
-            scorer_class = None
 
         return cls(
             logger=manager.logger.backend,
