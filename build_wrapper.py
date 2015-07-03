@@ -314,6 +314,7 @@ ffi.cdef(
          void *error;
          int persist;
          float margin;
+         size_t max_n_crawls;
     } FreqScheduler;
 
     FreqSchedulerError

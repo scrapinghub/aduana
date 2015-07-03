@@ -308,6 +308,14 @@ class FreqScheduler(object):
     def __del__(self):
         self._c_aduana.freq_scheduler_delete(self._sch[0])
 
+    @property
+    def max_n_crawls(self):
+        return self._sch[0].max_n_crawls
+
+    @max_n_crawls.setter
+    def max_n_crawls(self, value):
+        self._sch[0].max_n_crawls = value
+
 if __name__ == '__main__':
     db = PageDB('./test_python_bindings')
     scorer = PageRankScorer(db)

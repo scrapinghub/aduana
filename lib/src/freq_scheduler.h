@@ -40,6 +40,8 @@ typedef struct {
       *                                      frequency * (1.0 + margin)
       */
      float margin;
+     /** Do not crawl more than this specified number of times */
+     size_t max_n_crawls;
 } FreqScheduler;
 
 FreqSchedulerError

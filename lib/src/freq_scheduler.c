@@ -47,6 +47,8 @@ freq_scheduler_new(FreqScheduler **sch, PageDB *db) {
      p->page_db = db;
      p->persist = 0;
      p->margin = -1.0; // disabled
+     p->max_n_crawls = 0;
+
      // create directory if not present yet
      char *error = 0;
      if (!(p->path = concat(db->path, "freqs", '_')))
@@ -141,25 +143,32 @@ freq_scheduler_load_simple(FreqScheduler *sch,
      PageInfo *pi;
 
      while ((ss = hashinfo_stream_next(st, &hash, &pi)) == stream_state_next) {
-          ScheduleKey sk = {
-               .score = 0,
-               .hash  = hash
-          };
-          MDB_val key = {
-               .mv_size = sizeof(sk),
-               .mv_data = &sk,
-          };
-          float freq = freq_scale>0? freq_scale*page_info_rate(pi): freq_default;
-          MDB_val val = {
-               .mv_size = sizeof(float),
-               .mv_data = &freq,
-          };
-          if ((mdb_rc = mdb_cursor_put(cur, &key, &val, 0)) != 0) {
-               error1 = "adding page to schedule";
-               error2 = mdb_strerror(mdb_rc);
-               goto on_error;
+          if (pi->n_crawls > 0) {
+               ScheduleKey sk = {
+                    .score = 0,
+                    .hash  = hash
+               };
+               MDB_val key = {
+                    .mv_size = sizeof(sk),
+                    .mv_data = &sk,
+               };
+               float freq = freq_default;
+               if (freq_scale > 0) {
+                    float rate = page_info_rate(pi);
+                    if (rate > 0) {
+                         freq = freq_scale * rate;
+                    }
+               }
+               MDB_val val = {
+                    .mv_size = sizeof(float),
+                    .mv_data = &freq,
+               };
+               if ((mdb_rc = mdb_cursor_put(cur, &key, &val, 0)) != 0) {
+                    error1 = "adding page to schedule";
+                    error2 = mdb_strerror(mdb_rc);
+                    goto on_error;
+               }
           }
-
           page_info_delete(pi);
      }
      if (ss != stream_state_end) {
@@ -314,14 +323,21 @@ freq_scheduler_request(FreqScheduler *sch,
                }
 
                sk.score += 1.0/freq;
-
                val.mv_data = &freq;
                key.mv_data = &sk;
-               if ((mdb_rc = mdb_cursor_del(cur, 0) != 0) ||
-                   (mdb_rc = mdb_cursor_put(cur, &key, &val, 0) != 0)) {
-                    error1 = "moving head of schedule";
+
+               if ((mdb_rc = mdb_cursor_del(cur, 0)) != 0) {
+                    error1 = "deleting head of schedule";
                     error2 = mdb_strerror(mdb_rc);
                     goto on_error;
+               }
+
+               if ((sch->max_n_crawls == 0) || (pi->n_crawls < sch->max_n_crawls)) {
+                    if ((mdb_rc = mdb_cursor_put(cur, &key, &val, 0)) != 0) {
+                         error1 = "moving element inside schedule";
+                         error2 = mdb_strerror(mdb_rc);
+                         goto on_error;
+                    }
                }
                break;
 

@@ -67,6 +67,10 @@ class Backend(frontera.Backend):
         scheduler = aduana.FreqScheduler(page_db, persist=page_db.persist)
         scheduler.load_simple()
 
+        max_n_crawls = manager.settings.get('MAX_N_CRAWLS', None)
+        if max_n_crawls:
+            scheduler.max_n_crawls = max_n_crawls
+
         return cls(scheduler)
 
     def frontier_start(self):
