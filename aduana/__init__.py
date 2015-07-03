@@ -152,7 +152,8 @@ class PageRankScorer(object):
 
     @use_content_scores.setter
     def use_content_scores(self, value):
-        self._c_aduana.page_rank_scorer_set_use_content_scores(self._scorer[0], value)
+        self._c_aduana.page_rank_scorer_set_use_content_scores(
+            self._scorer[0], 1 if value else 0)
 
     @property
     def damping(self):
@@ -189,7 +190,8 @@ class HitsScorer(object):
 
     @use_content_scores.setter
     def use_content_scores(self, value):
-        self._c_aduana.hits_scorer_set_use_content_scores(self._scorer[0], value)
+        self._c_aduana.hits_scorer_set_use_content_scores(
+            self._scorer[0], 1 if value else 0)
 
 ########################################################################
 # Scheduler Wrappers

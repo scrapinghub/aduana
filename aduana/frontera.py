@@ -10,62 +10,64 @@ import requests.auth
 
 
 class Backend(frontera.Backend):
-    def __init__(self,
-                 logger,
-                 db=None,
-                 scorer_class=aduana.HitsScorer,
-                 use_scores=False,
-                 soft_crawl_limit=0.25,
-                 hard_crawl_limit=100,
-                 max_crawl_depth=None,
-                 **kwargs):
-        self.logger = logger
-        if db:
-            db_path = db
-            persist = 1
-        else:
-            db_path = tempfile.mkdtemp(prefix='frontera_', dir='./')
-            persist = 0
-
-        self._page_db = aduana.PageDB(db_path)
-
-        if scorer_class is None:
-            self._scorer = None
-        else:
-            self._scorer = scorer_class(self._page_db)
-            if use_scores:
-                if scorer_class == aduana.PageRankScorer:
-                    self._scorer.damping = kwargs.get('page_rank_damping', 0.85)
-                self._scorer.use_content_scores = use_scores
-
-        self._scheduler = aduana.BFScheduler(
-            self._page_db,
-            scorer=self._scorer,
-            persist=persist
-        )
-        self._scheduler.set_crawl_rate(soft_crawl_limit, hard_crawl_limit)
-        if max_crawl_depth:
-            self._scheduler.set_max_crawl_depth(max_crawl_depth)
-
+    def __init__(self, scheduler):
+        self._scheduler = scheduler
         self._n_seeds = 0
 
     @classmethod
     def from_manager(cls, manager):
-        scorer_class = manager.settings.get('SCORER', None)
+        db_path = manager.settings.get('PAGE_DB_PATH', None)
+        if db_path:
+            persist = 1
+        else:
+            db_path = tempfile.mkdtemp(prefix='frontera_', dir='./')
+            persist = 0
+        page_db = aduana.PageDB(db_path, persist=persist)
+
+        scheduler_class = manager.settings.get('BACKEND_SCHEDULER', None)
+        if scheduler_class is None:
+            scheduler_class = aduana.BFScheduler
+            manager.logger.backend.warning(
+                'No SCHEDULER setting. Using default BFScheduler')
+
+        if scheduler_class is aduana.BFScheduler:
+            return cls.from_manager_bf_scheduler(manager, page_db)
+        elif scheduler_class is aduana.FreqScheduler:
+            return cls.from_manager_freq_scheduler(manager, page_db)
+
+    @classmethod
+    def from_manager_bf_scheduler(cls, manager, page_db):
+        scorer_class = manager.settings.get('SCORER', False)
         if scorer_class is None:
             manager.logger.backend.warning(
                 'No SCORER setting. Using default content scorer')
+            scorer = None
+        else:
+            scorer = scorer_class(page_db)
+            use_scores = manager.settings.get('USE_SCORES', False)
+            if use_scores:
+                if scorer_class == aduana.PageRankScorer:
+                    scorer.damping = manager.settings.get('PAGE_RANK_DAMPING', 0.85)
+                scorer.use_content_scores = use_scores
 
-        return cls(
-            logger=manager.logger.backend,
-            db=manager.settings.get('PAGE_DB_PATH', None),
-            use_scores=manager.settings.get('USE_SCORES', False),
-            scorer_class=scorer_class,
-            soft_crawl_limit=manager.settings.get('SOFT_CRAWL_LIMIT', 0.25),
-            hard_crawl_limit=manager.settings.get('HARD_CRAWL_LIMIT', 100.0),
-            max_crawl_depth=manager.settings.get('MAX_CRAWL_DEPTH', None),
-            page_rank_damping=manager.settings.get('PAGE_RANK_DAMPING', 0.85)
-        )
+        scheduler = aduana.BFScheduler(
+            page_db, scorer=scorer, persist=page_db.persist)
+        soft_crawl_limit = manager.settings.get('SOFT_CRAWL_LIMIT', 0.25)
+        hard_crawl_limit = manager.settings.get('HARD_CRAWL_LIMIT', 100.0)
+        scheduler.set_crawl_rate(soft_crawl_limit, hard_crawl_limit)
+
+        max_crawl_depth = manager.settings.get('MAX_CRAWL_DEPTH', None)
+        if max_crawl_depth:
+            scheduler.set_max_crawl_depth(max_crawl_depth)
+
+        return cls(scheduler)
+
+    @classmethod
+    def from_manager_freq_scheduler(cls, manager, page_db):
+        scheduler = aduana.FreqScheduler(page_db, persist=page_db.persist)
+        scheduler.load_simple()
+
+        return cls(scheduler)
 
     def frontier_start(self):
         pass
