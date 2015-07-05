@@ -267,9 +267,11 @@ page_info_update(PageInfo *pi, const CrawledPage *cp) {
                     break;
                }
      }
-     pi->n_crawls++;
      pi->last_crawl = cp->time;
+     if (pi->n_crawls == 0)
+          pi->first_crawl = cp->time;
      pi->score = cp->score;
+     pi->n_crawls++;
 
      return 0;
 }
