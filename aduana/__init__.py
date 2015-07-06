@@ -259,6 +259,34 @@ class BFScheduler(object):
             raise PageDBException.from_error(self._sch[0].error)
         self._c_aduana.bf_scheduler_delete(self._sch[0])
 
+    @classmethod
+    def from_settings(cls, page_db, settings, logger=None):
+        scorer_class = settings.get('SCORER', False)
+        if scorer_class is None:
+            if logger:
+                logger.backend.warning(
+                    'No SCORER setting. Using default content scorer')
+            scorer = None
+        else:
+            scorer = scorer_class(page_db)
+            use_scores = settings.get('USE_SCORES', False)
+            if use_scores:
+                if scorer_class == PageRankScorer:
+                    scorer.damping = settings.get('PAGE_RANK_DAMPING', 0.85)
+                scorer.use_content_scores = use_scores
+
+        scheduler = cls(page_db, scorer=scorer, persist=page_db.persist)
+
+        soft_crawl_limit = settings.get('SOFT_CRAWL_LIMIT', 0.25)
+        hard_crawl_limit = settings.get('HARD_CRAWL_LIMIT', 100.0)
+        scheduler.set_crawl_rate(soft_crawl_limit, hard_crawl_limit)
+
+        max_crawl_depth = settings.get('MAX_CRAWL_DEPTH', None)
+        if max_crawl_depth:
+            scheduler.set_max_crawl_depth(max_crawl_depth)
+
+        return scheduler
+
     def add(self, crawled_page):
         return self._core.add(crawled_page)
 
@@ -294,6 +322,23 @@ class FreqScheduler(object):
                 raise PageDBException("Error inside freq_scheduler_new", ret)
 
         self._sch[0].persist = persist
+
+    @classmethod
+    def from_settings(cls, page_db, settings, logger=None):
+        scheduler = cls(page_db, persist=page_db.persist)
+
+        max_n_crawls = settings.get('MAX_N_CRAWLS', None)
+        if max_n_crawls:
+            scheduler.max_n_crawls = max_n_crawls
+
+        freq_default = settings.get('FREQ_DEFAULT', 0.1)
+        freq_scale = settings.get('FREQ_SCALE', -1.0)
+        scheduler.load_simple(freq_default, freq_scale)
+
+        freq_margin = settings.get('FREQ_MARGIN', -1.0)
+        scheduler.margin = freq_margin
+
+        return scheduler
 
     def load_simple(self, freq_default=1.0, freq_scale=None):
         self._c_aduana.freq_scheduler_load_simple(

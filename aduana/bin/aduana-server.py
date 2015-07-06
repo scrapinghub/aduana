@@ -33,7 +33,7 @@ class Settings(object):
 
     # Default settings
     PAGE_DB_PATH = 'test-server'
-    SCORER = 'HitsScorer'
+    SCORER = aduana.HitsScorer
     USE_SCORES = True
     PAGE_RANK_DAMPING = 0.85
     PERSIST = False
@@ -65,6 +65,9 @@ class Settings(object):
     def __call__(self, name):
         """Return setting by its name"""
         return getattr(self.config, name, getattr(self, name, None))
+
+    def get(self, name, default=None):
+        return self(name) or default
 
 
 def error_response(resp, message):
@@ -163,21 +166,11 @@ if __name__ == '__main__':
         settings.SEEDS = args.seeds
 
     page_db = aduana.PageDB(settings('PAGE_DB_PATH'))
-
-    scorer_name = settings('SCORER')
-    if scorer_name:
-        scorer_class = getattr(aduana, settings('SCORER'))
-        scorer = scorer_class(page_db)
-        scorer.use_content_scores = settings('USE_SCORES')
-        if isinstance(scorer, aduana.PageRankScorer):
-            scorer.damping = settings('PAGE_RANK_DAMPING')
-    else:
-        scorer = None
-
-    scheduler = aduana.BFScheduler(
-        page_db, scorer=scorer, persist=settings('PERSIST'))
-    scheduler.set_crawl_rate(
-        settings('SOFT_CRAWL_LIMIT'), settings('HARD_CRAWL_LIMIT'))
+    scheduler_class = settings.get('BACKEND_SCHEDULER', None)
+    if scheduler_class is None:
+        print('No SCHEDULER setting. Using default BFScheduler', file=sys.stderr)
+        scheduler_class = aduana.BFScheduler
+    scheduler = scheduler_class.from_settings(page_db, settings, logger=None)
 
     seeds_path = settings('SEEDS')
     if seeds_path is None:

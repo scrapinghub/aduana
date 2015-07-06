@@ -31,53 +31,13 @@ class Backend(frontera.Backend):
                 'No SCHEDULER setting. Using default BFScheduler')
 
         if scheduler_class is aduana.BFScheduler:
-            return cls.from_manager_bf_scheduler(manager, page_db)
+            return cls(
+                aduana.BFScheduler.from_settings(
+                    page_db, manager.settings, manager.logger))
         elif scheduler_class is aduana.FreqScheduler:
-            return cls.from_manager_freq_scheduler(manager, page_db)
-
-    @classmethod
-    def from_manager_bf_scheduler(cls, manager, page_db):
-        scorer_class = manager.settings.get('SCORER', False)
-        if scorer_class is None:
-            manager.logger.backend.warning(
-                'No SCORER setting. Using default content scorer')
-            scorer = None
-        else:
-            scorer = scorer_class(page_db)
-            use_scores = manager.settings.get('USE_SCORES', False)
-            if use_scores:
-                if scorer_class == aduana.PageRankScorer:
-                    scorer.damping = manager.settings.get('PAGE_RANK_DAMPING', 0.85)
-                scorer.use_content_scores = use_scores
-
-        scheduler = aduana.BFScheduler(
-            page_db, scorer=scorer, persist=page_db.persist)
-        soft_crawl_limit = manager.settings.get('SOFT_CRAWL_LIMIT', 0.25)
-        hard_crawl_limit = manager.settings.get('HARD_CRAWL_LIMIT', 100.0)
-        scheduler.set_crawl_rate(soft_crawl_limit, hard_crawl_limit)
-
-        max_crawl_depth = manager.settings.get('MAX_CRAWL_DEPTH', None)
-        if max_crawl_depth:
-            scheduler.set_max_crawl_depth(max_crawl_depth)
-
-        return cls(scheduler)
-
-    @classmethod
-    def from_manager_freq_scheduler(cls, manager, page_db):
-        scheduler = aduana.FreqScheduler(page_db, persist=page_db.persist)
-
-        max_n_crawls = manager.settings.get('MAX_N_CRAWLS', None)
-        if max_n_crawls:
-            scheduler.max_n_crawls = max_n_crawls
-
-        freq_default = manager.settings.get('FREQ_DEFAULT', 0.1)
-        freq_scale = manager.settings.get('FREQ_SCALE', -1.0)
-        scheduler.load_simple(freq_default, freq_scale)
-
-        freq_margin = manager.settings.get('FREQ_MARGIN', -1.0)
-        scheduler.margin = freq_margin
-
-        return cls(scheduler)
+            return cls(
+                aduana.FreqScheduler.from_settings(
+                    page_db, manager.settings))
 
     def frontier_start(self):
         pass
