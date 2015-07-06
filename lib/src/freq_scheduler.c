@@ -143,7 +143,10 @@ freq_scheduler_load_simple(FreqScheduler *sch,
      PageInfo *pi;
 
      while ((ss = hashinfo_stream_next(st, &hash, &pi)) == stream_state_next) {
-          if (pi->n_crawls > 0) {
+          if ((pi->n_crawls > 0) &&
+	      ((sch->max_n_crawls == 0) || (pi->n_crawls < sch->max_n_crawls)) &&
+	      !page_info_is_seed(pi)){
+
                ScheduleKey sk = {
                     .score = 0,
                     .hash  = hash
@@ -159,15 +162,17 @@ freq_scheduler_load_simple(FreqScheduler *sch,
                          freq = freq_scale * rate;
                     }
                }
-               MDB_val val = {
-                    .mv_size = sizeof(float),
-                    .mv_data = &freq,
-               };
-               if ((mdb_rc = mdb_cursor_put(cur, &key, &val, 0)) != 0) {
-                    error1 = "adding page to schedule";
-                    error2 = mdb_strerror(mdb_rc);
-                    goto on_error;
-               }
+	       if (freq > 0) {
+		    MDB_val val = {
+			 .mv_size = sizeof(float),
+			 .mv_data = &freq,
+		    };
+		    if ((mdb_rc = mdb_cursor_put(cur, &key, &val, 0)) != 0) {
+			 error1 = "adding page to schedule";
+			 error2 = mdb_strerror(mdb_rc);
+			 goto on_error;
+		    }
+	       }
           }
           page_info_delete(pi);
      }
@@ -297,8 +302,15 @@ freq_scheduler_request(FreqScheduler *sch,
 
           switch (mdb_rc = mdb_cursor_get(cur, &key, &val, MDB_FIRST)) {
           case 0:
+	       // copy data before deleting cursor
                sk = *(ScheduleKey*)key.mv_data;
                freq = *(float*)val.mv_data;
+
+	       if ((mdb_rc = mdb_cursor_del(cur, 0)) != 0) {
+                    error1 = "deleting head of schedule";
+                    error2 = mdb_strerror(mdb_rc);
+                    goto on_error;
+               }
 
                PageInfo *pi = 0;
                if (page_db_get_info(sch->page_db, sk.hash, &pi) != 0) {
@@ -314,31 +326,27 @@ freq_scheduler_request(FreqScheduler *sch,
                          if (elapsed < 1.0/(freq*(1.0 + sch->margin)))
                               interrupt_requests = 1;
                     }
-                    if (!interrupt_requests &&
-                        (page_request_add_url(req, pi->url) != 0)) {
-                         error1 = "adding url to request";
-                         goto on_error;
-                    }
+		    if (!interrupt_requests &&
+			((sch->max_n_crawls == 0) || (pi->n_crawls < sch->max_n_crawls))) {
+			 sk.score += 1.0/freq;
+			 val.mv_data = &freq;
+			 key.mv_data = &sk;
+
+			 if ((mdb_rc = mdb_cursor_put(cur, &key, &val, 0)) != 0) {
+			      error1 = "moving element inside schedule";
+			      error2 = mdb_strerror(mdb_rc);
+			      goto on_error;
+			 }
+
+			 if (page_request_add_url(req, pi->url) != 0) {
+			      error1 = "adding url to request";
+			      goto on_error;
+			 }
+
+		    }
                     page_info_delete(pi);
                }
 
-               sk.score += 1.0/freq;
-               val.mv_data = &freq;
-               key.mv_data = &sk;
-
-               if ((mdb_rc = mdb_cursor_del(cur, 0)) != 0) {
-                    error1 = "deleting head of schedule";
-                    error2 = mdb_strerror(mdb_rc);
-                    goto on_error;
-               }
-
-               if ((sch->max_n_crawls == 0) || (pi->n_crawls < sch->max_n_crawls)) {
-                    if ((mdb_rc = mdb_cursor_put(cur, &key, &val, 0)) != 0) {
-                         error1 = "moving element inside schedule";
-                         error2 = mdb_strerror(mdb_rc);
-                         goto on_error;
-                    }
-               }
                break;
 
           case MDB_NOTFOUND: // no more pages left
