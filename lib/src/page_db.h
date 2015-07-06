@@ -184,6 +184,10 @@ page_info_print(const PageInfo *pi, char *out);
 float
 page_info_rate(const PageInfo *pi);
 
+/** Return true if page is a seed page */
+int
+page_info_is_seed(const PageInfo *pi);
+
 /** Destroy PageInfo if not NULL, otherwise does nothing */
 void
 page_info_delete(PageInfo *pi);

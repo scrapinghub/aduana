@@ -427,8 +427,18 @@ page_info_rate(const PageInfo *pi) {
      float rate = -1.0;
      float delta = pi->last_crawl - pi->first_crawl;
      if (delta > 0)
-          rate = ((float)pi->n_changes)/delta;
+          rate = ((float)pi->n_changes + 1.0)/delta;
      return rate;
+}
+
+int
+page_info_is_seed(const PageInfo *pi) {
+     return (pi->url[0] == '_' &&
+	     pi->url[1] == 's' &&
+	     pi->url[2] == 'e' &&
+	     pi->url[3] == 'e' &&
+	     pi->url[4] == 'd' &&
+	     pi->url[5] == '_');
 }
 
 void
