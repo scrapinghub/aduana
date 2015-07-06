@@ -65,7 +65,13 @@ class Backend(frontera.Backend):
     @classmethod
     def from_manager_freq_scheduler(cls, manager, page_db):
         scheduler = aduana.FreqScheduler(page_db, persist=page_db.persist)
-        scheduler.load_simple()
+
+        freq_default = manager.settings.get('FREQ_DEFAULT', 0.1)
+        freq_scale = manager.settings.get('FREQ_SCALE', -1.0)
+        scheduler.load_simple(freq_default, freq_scale)
+
+        freq_margin = manager.settings.get('FREQ_MARGIN', -1.0)
+        scheduler.margin = freq_margin
 
         max_n_crawls = manager.settings.get('MAX_N_CRAWLS', None)
         if max_n_crawls:

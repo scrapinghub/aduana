@@ -316,6 +316,14 @@ class FreqScheduler(object):
     def max_n_crawls(self, value):
         self._sch[0].max_n_crawls = value
 
+    @property
+    def margin(self):
+        return self._sch[0].margin
+
+    @margin.setter
+    def margin(self, value):
+        self._sch[0].margin = value
+
 if __name__ == '__main__':
     db = PageDB('./test_python_bindings')
     scorer = PageRankScorer(db)
