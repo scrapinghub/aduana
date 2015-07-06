@@ -48,6 +48,10 @@ FreqSchedulerError
 freq_scheduler_new(FreqScheduler **sch, PageDB *path);
 
 FreqSchedulerError
+freq_scheduler_load_simple(FreqScheduler *sch,
+                           float freq_default,
+                           float freq_scale);
+FreqSchedulerError
 freq_scheduler_load_mmap(FreqScheduler *sch, MMapArray *freqs);
 
 FreqSchedulerError
