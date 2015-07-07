@@ -300,17 +300,13 @@ freq_scheduler_request(FreqScheduler *sch,
           ScheduleKey sk;
           float freq;
 
+	  int crawl = 0;
           switch (mdb_rc = mdb_cursor_get(cur, &key, &val, MDB_FIRST)) {
           case 0:
 	       // copy data before deleting cursor
                sk = *(ScheduleKey*)key.mv_data;
                freq = *(float*)val.mv_data;
 
-	       if ((mdb_rc = mdb_cursor_del(cur, 0)) != 0) {
-                    error1 = "deleting head of schedule";
-                    error2 = mdb_strerror(mdb_rc);
-                    goto on_error;
-               }
 
                PageInfo *pi = 0;
                if (page_db_get_info(sch->page_db, sk.hash, &pi) != 0) {
@@ -319,33 +315,38 @@ freq_scheduler_request(FreqScheduler *sch,
                     goto on_error;
                }
 
-               // check crawl rate
                if (pi) {
                     if (sch->margin >= 0) {
                          double elapsed = difftime(time(0), 0) - pi->last_crawl;
                          if (elapsed < 1.0/(freq*(1.0 + sch->margin)))
                               interrupt_requests = 1;
                     }
-		    if (!interrupt_requests &&
-			((sch->max_n_crawls == 0) || (pi->n_crawls < sch->max_n_crawls))) {
-			 sk.score += 1.0/freq;
-			 val.mv_data = &freq;
-			 key.mv_data = &sk;
-
-			 if ((mdb_rc = mdb_cursor_put(cur, &key, &val, 0)) != 0) {
-			      error1 = "moving element inside schedule";
-			      error2 = mdb_strerror(mdb_rc);
-			      goto on_error;
-			 }
-
+		    crawl = (sch->max_n_crawls == 0) || (pi->n_crawls < sch->max_n_crawls);
+	       }
+	       if (!interrupt_requests) {
+		    if ((mdb_rc = mdb_cursor_del(cur, 0)) != 0) {
+			 error1 = "deleting head of schedule";
+			 error2 = mdb_strerror(mdb_rc);
+			 goto on_error;
+		    }
+		    if (crawl) {
 			 if (page_request_add_url(req, pi->url) != 0) {
 			      error1 = "adding url to request";
 			      goto on_error;
 			 }
 
+			 sk.score += 1.0/freq;
+
+			 val.mv_data = &freq;
+			 key.mv_data = &sk;
+			 if ((mdb_rc = mdb_cursor_put(cur, &key, &val, 0)) != 0) {
+			      error1 = "moving element inside schedule";
+			      error2 = mdb_strerror(mdb_rc);
+			      goto on_error;
+			 }
 		    }
-                    page_info_delete(pi);
-               }
+	       }
+	       page_info_delete(pi);
 
                break;
 
