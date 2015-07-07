@@ -123,13 +123,27 @@ class WebBackend(frontera.Backend):
         pass
 
     def page_crawled(self, response, links):
+        try:
+            score = response.meta['scrapy_meta']['score']
+        except KeyError:
+            score = 0.0
+
+        try:
+            content_hash = response.meta['scrapy_meta']['content_hash']
+        except KeyError:
+            content_hash = None
+
+        message = {
+            'url': response.url,
+            'score': score,
+            'links': [(link.url, link.meta['scrapy_meta']['score']) for link in links],
+        }
+        if content_hash:
+            message['content_hash'] = content_hash
+
         r = self.session.post(
             self.server + '/crawled',
-            json={
-                'url': response.url,
-                'score': response.meta.get('score', 0.0),
-                'links': [(link.url, link.meta['scrapy_meta']['score']) for link in links]
-            },
+            json=message,
             verify=self.server_cert is not None
         )
         if r.status_code != 201:

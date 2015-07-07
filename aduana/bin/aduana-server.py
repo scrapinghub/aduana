@@ -90,7 +90,8 @@ class Crawled(object):
           "links": [["http://scrapinghub.com/professional-services/", 1.0],
                     ["http://scrapinghub.com/platform/", 0.5],
                     ["http://scrapinghub.com/pricing/", 0.8],
-                    ["http://scrapinghub.com/clients/", 0.9]] }
+                    ["http://scrapinghub.com/clients/", 0.9]],
+          "content_hash": 27348276 }
 
         Only the URL field is mandatory. If there are no links that field can
         be left out of the dictionary. If no score it will be assumed 0.0.
@@ -112,6 +113,11 @@ class Crawled(object):
                      for (lurl, score) in data.get('links', [])]
             cp = aduana.CrawledPage(url, links)
             cp.score = data.get('score', 0.0)
+
+            content_hash = data.get('content_hash', None)
+            if content_hash:
+                cp.hash = int(content_hash)
+
         except TypeError as e:
             error_response(resp, 'ERROR: Incorrect data inside CrawledPage. ' + str(e))
             return
