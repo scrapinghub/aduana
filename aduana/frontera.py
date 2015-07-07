@@ -61,10 +61,16 @@ class Backend(frontera.Backend):
         cp = aduana.CrawledPage(
             response.url,
             [(link.url, link.meta['scrapy_meta']['score']) for link in links])
+
         try:
-            cp.score = response.meta['score']
+            cp.score = response.meta['scrapy_meta']['score']
         except KeyError:
             cp.score = 0.0
+
+        try:
+            cp.hash = response.meta['scrapy_meta']['content_hash']
+        except KeyError:
+            pass
 
         self._scheduler.add(cp)
 
