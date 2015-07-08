@@ -58,9 +58,9 @@ bf_scheduler_new(BFScheduler **sch, PageDB *db) {
      int rc;
      if ((rc = pthread_mutex_init(&p->update_thread->state_mutex, 0)) != 0)
           error = "initializing update thread mutex";
-     else if ((rc = pthread_mutex_init(&p->update_thread->n_pages_mutex, 0)) != 0)
+     else if ((rc = pthread_mutex_init(&p->update_thread->wait_mutex, 0)) != 0)
           error = "initializing n_pages mutex";
-     else if ((rc = pthread_cond_init(&p->update_thread->n_pages_cond, 0)) != 0)
+     else if ((rc = pthread_cond_init(&p->update_thread->wait_cond, 0)) != 0)
           error = "initializing n_pages cond";
 
      if (error != 0) {
@@ -165,13 +165,13 @@ bf_scheduler_add(BFScheduler *sch, const CrawledPage *page) {
      }
 
      int rc = 0;
-     if ((rc = pthread_mutex_lock(&sch->update_thread->n_pages_mutex)) != 0)
+     if ((rc = pthread_mutex_lock(&sch->update_thread->wait_mutex)) != 0)
           error1 = "locking n_pages mutex";
      else {
           sch->update_thread->n_pages_new += 1.0;
-          if ((rc = pthread_cond_broadcast(&sch->update_thread->n_pages_cond)) != 0)
+          if ((rc = pthread_cond_broadcast(&sch->update_thread->wait_cond)) != 0)
                error1 = "broadcasting n_pages signal";
-          else if ((rc = pthread_mutex_unlock(&sch->update_thread->n_pages_mutex)) != 0)
+          else if ((rc = pthread_mutex_unlock(&sch->update_thread->wait_mutex)) != 0)
                error1 = "unlocking n_pages mutex";
      }
      if (error1 != 0) {
@@ -423,31 +423,62 @@ bf_scheduler_update_finished(BFScheduler *sch, int *stop) {
      return bf_scheduler_mutex_unlock(sch);
 }
 
+static int
+bf_scheduler_update_is_blocked(BFScheduler *sch) {
+     const int block_1 = sch->update_thread->n_pages_new <
+	  (sch->update_thread->n_pages_old + BF_SCHEDULER_UPDATE_NUM_PAGES);
+     const int block_2 = sch->update_thread->n_pages_new <
+	  sch->update_thread->n_pages_old*(1.0 + BF_SCHEDULER_UPDATE_PER_PAGES);
+     return block_1 || block_2;
+}
+
+static void
+bf_scheduler_update_set_block(BFScheduler *sch) {
+     sch->update_thread->n_pages_old = sch->update_thread->n_pages_new;
+}
+
 static void*
 bf_scheduler_update_thread(void *arg) {
      BFScheduler *sch = arg;
      int stop = 0;
      int rc = 0;
      do {
-          if ((rc = pthread_mutex_lock(&sch->update_thread->n_pages_mutex)) != 0)
-               goto error_thread;
-          while ((sch->update_thread->n_pages_new <
-                  (sch->update_thread->n_pages_old + BF_SCHEDULER_UPDATE_NUM_PAGES)) ||
-                 (sch->update_thread->n_pages_new <
-                  sch->update_thread->n_pages_old*(1.0 + BF_SCHEDULER_UPDATE_PER_PAGES))) {
-               if ((rc = pthread_cond_wait(&sch->update_thread->n_pages_cond,
-                                           &sch->update_thread->n_pages_mutex)) != 0)
-                    goto error_thread;
+	  if (sch->update_thread->rest_time == 0) {
+	       if ((rc = pthread_mutex_lock(&sch->update_thread->wait_mutex)) != 0)
+		    goto error_thread;
+	       while (bf_scheduler_update_is_blocked(sch)) {
+		    if ((rc = pthread_cond_wait(&sch->update_thread->wait_cond,
+						&sch->update_thread->wait_mutex)) != 0)
+			 goto error_thread;
 
-               if (bf_scheduler_update_finished(sch, &stop) != 0)
-                    return sch;
-               if (stop)
-                    break;
-          }
-          sch->update_thread->n_pages_old = sch->update_thread->n_pages_new;
-          if ((rc = pthread_mutex_unlock(&sch->update_thread->n_pages_mutex)) != 0)
-               goto error_thread;
-
+		    if (bf_scheduler_update_finished(sch, &stop) != 0)
+			 return sch;
+		    if (stop)
+			 break;
+	       }
+	       bf_scheduler_update_set_block(sch);
+	       if ((rc = pthread_mutex_unlock(&sch->update_thread->wait_mutex)) != 0)
+		    goto error_thread;
+	  } else {
+	       struct timespec req = {
+		    .tv_sec = sch->update_thread->rest_time,
+		    .tv_nsec = 0
+	       };
+	       struct timespec rem;
+	       int continue_sleeping;
+	       do {
+		    if (nanosleep(&req, &rem) == 0)
+			 continue_sleeping = 0;
+		    else switch (rc = errno) {
+			 case EINTR:
+			      req = rem;
+			      continue_sleeping = 1;
+			      break;
+			 default:
+			      goto error_thread;
+			 }
+	       } while (continue_sleeping);
+	  }
           if (bf_scheduler_update_finished(sch, &stop) != 0)
                return sch;
 
@@ -520,9 +551,9 @@ bf_scheduler_update_stop(BFScheduler *sch) {
                case update_thread_working:
                     sch->update_thread->state = update_thread_stopped;
 
-                    pthread_mutex_lock(&sch->update_thread->n_pages_mutex);
-                    pthread_cond_broadcast(&sch->update_thread->n_pages_cond);
-                    pthread_mutex_unlock(&sch->update_thread->n_pages_mutex);
+                    pthread_mutex_lock(&sch->update_thread->wait_mutex);
+                    pthread_cond_broadcast(&sch->update_thread->wait_cond);
+                    pthread_mutex_unlock(&sch->update_thread->wait_mutex);
 
                     break;
                case update_thread_stopped:
@@ -714,14 +745,20 @@ bf_scheduler_set_max_domain_crawl_rate(BFScheduler *sch,
      return 0;
 }
 
+/** Set @ref BFScheduler::update_interval option for scheduler */
+void
+bf_scheduler_set_update_interval(BFScheduler *sch, time_t value) {
+     sch->update_thread->rest_time = value;
+}
+
 void
 bf_scheduler_delete(BFScheduler *sch) {
      if (sch->update_thread->state != update_thread_none) {
           (void)bf_scheduler_update_stop(sch);
           (void)pthread_join(sch->update_thread->thread, 0);
      }
-     (void)pthread_mutex_destroy(&sch->update_thread->n_pages_mutex);
-     (void)pthread_cond_destroy(&sch->update_thread->n_pages_cond);
+     (void)pthread_mutex_destroy(&sch->update_thread->wait_mutex);
+     (void)pthread_cond_destroy(&sch->update_thread->wait_cond);
      (void)pthread_mutex_destroy(&sch->update_thread->state_mutex);
 
      mdb_env_close(sch->txn_manager->env);

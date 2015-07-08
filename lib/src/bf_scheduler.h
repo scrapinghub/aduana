@@ -2,6 +2,7 @@
 #define __BF_SCHEDULER_H__
 
 #include <pthread.h>
+#include <time.h>
 
 #include "page_db.h"
 #include "scheduler.h"
@@ -79,10 +80,13 @@ typedef struct {
 
      /** We only perform an update of scores and schedule when enough new pages
       * have been added, otherwise the update thread sleeps */
-     pthread_mutex_t n_pages_mutex;
-     pthread_cond_t n_pages_cond;    /**< Signaled when a page is added */
+     pthread_mutex_t wait_mutex;
+     pthread_cond_t wait_cond;      /**< Signaled when a page is added */
      double n_pages_old;             /**< Number of pages when last updated was done */
      double n_pages_new;             /**< Current number of pages */
+
+     /** Time in seconds between updates */
+     time_t rest_time;
 
      /** The update thread runs in parallel the scorer and updates the schedule
          when changes in score happen */
@@ -210,6 +214,10 @@ bf_scheduler_set_max_domain_crawl_rate(BFScheduler *sch,
 /** Set @ref BFScheduler::max_crawl_depth option for scheduler */
 void
 bf_scheduler_set_max_crawl_depth(BFScheduler *sch, uint64_t value);
+
+/** Set @ref BFScheduler::update_interval option for scheduler */
+void
+bf_scheduler_set_update_interval(BFScheduler *sch, time_t value);
 
 /// @}
 

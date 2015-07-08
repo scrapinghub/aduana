@@ -285,6 +285,10 @@ class BFScheduler(object):
         if max_crawl_depth:
             scheduler.set_max_crawl_depth(max_crawl_depth)
 
+        update_interval = settings.get('SCORE_UPDATE_INTERVAL', None)
+        if update_interval:
+            scheduler.set_update_interval(update_interval)
+
         return scheduler
 
     def add(self, crawled_page):
@@ -298,6 +302,9 @@ class BFScheduler(object):
 
     def set_max_crawl_depth(self, max_crawl_depth=0):
         self._c_aduana.bf_scheduler_set_max_crawl_depth(self._sch[0], max_crawl_depth)
+
+    def set_update_interval(self, update_interval):
+        self._c_aduana.bf_scheduler_set_update_interval(self._sch[0], update_interval)
 
 class FreqScheduler(object):
     def __init__(self, page_db, persist=0):

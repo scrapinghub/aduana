@@ -295,6 +295,11 @@ ffi.cdef(
                                            float max_hard_crawl_rate);
     void
     bf_scheduler_set_max_crawl_depth(BFScheduler *sch, uint64_t value);
+
+    typedef int... time_t;
+
+    void
+    bf_scheduler_set_update_interval(BFScheduler *sch, time_t value);
     """
 )
 
