@@ -66,7 +66,7 @@ test_freq_scheduler_requests_mmap(CuTest *tc) {
      db->persist = 0;
 
      FreqScheduler *sch;
-     ret = freq_scheduler_new(&sch, db);
+     ret = freq_scheduler_new(&sch, db, 0);
      CuAssert(tc,
 	      sch != 0? sch->error->message: "NULL",
 	      ret == 0);
@@ -150,7 +150,7 @@ test_freq_scheduler_requests_simple(CuTest *tc) {
      db->persist = 0;
 
      FreqScheduler *sch;
-     ret = freq_scheduler_new(&sch, db);
+     ret = freq_scheduler_new(&sch, db, 0);
      CuAssert(tc,
 	      sch != 0? sch->error->message: "NULL",
 	      ret == 0);

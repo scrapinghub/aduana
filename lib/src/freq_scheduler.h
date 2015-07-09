@@ -45,7 +45,7 @@ typedef struct {
 } FreqScheduler;
 
 FreqSchedulerError
-freq_scheduler_new(FreqScheduler **sch, PageDB *path);
+freq_scheduler_new(FreqScheduler **sch, PageDB *db, const char *path);
 
 FreqSchedulerError
 freq_scheduler_load_simple(FreqScheduler *sch,

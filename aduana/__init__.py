@@ -13,7 +13,7 @@ class PageDBException(Exception):
         self.code = code
 
     def __str__(self):
-        r = self.message
+        r = ffi.string(self.message)
         if self.code:
             r += " (code={0})".format(self.code)
         return r
@@ -223,7 +223,7 @@ class SchedulerCore(object):
         return reqs
 
 class BFScheduler(object):
-    def __init__(self, page_db, persist=0, scorer=None):
+    def __init__(self, page_db, persist=0, scorer=None, path=None):
         # save to make sure lib is available at destruction time
         self._c_aduana = C_ADUANA
 
@@ -237,7 +237,11 @@ class BFScheduler(object):
             self._c_aduana.bf_scheduler_request
         )
 
-        ret = self._c_aduana.bf_scheduler_new(self._sch, self._page_db._page_db[0])
+        ret = self._c_aduana.bf_scheduler_new(
+            self._sch,
+            self._page_db._page_db[0],
+            path or ffi.NULL
+        )
         if ret != 0:
             if self._sch:
                 raise PageDBException.from_error(self._sch[0].error)
@@ -307,7 +311,7 @@ class BFScheduler(object):
         self._c_aduana.bf_scheduler_set_update_interval(self._sch[0], update_interval)
 
 class FreqScheduler(object):
-    def __init__(self, page_db, persist=0):
+    def __init__(self, page_db, persist=0, path=None):
         # save to make sure lib is available at destruction time
         self._c_aduana = C_ADUANA
 
@@ -321,7 +325,11 @@ class FreqScheduler(object):
             self._c_aduana.freq_scheduler_request
         )
 
-        ret = self._c_aduana.freq_scheduler_new(self._sch, self._page_db._page_db[0])
+        ret = self._c_aduana.freq_scheduler_new(
+            self._sch,
+            self._page_db._page_db[0],
+            path or ffi.NULL
+        )
         if ret != 0:
             if self._sch:
                 raise PageDBException.from_error(self._sch[0].error)

@@ -40,7 +40,7 @@ bf_scheduler_add_error(BFScheduler *sch, const char *message) {
 }
 
 BFSchedulerError
-bf_scheduler_new(BFScheduler **sch, PageDB *db) {
+bf_scheduler_new(BFScheduler **sch, PageDB *db, const char *path) {
      BFScheduler *p = *sch = calloc(1, sizeof(*p));
      if (!p ||
          !(p->error         = error_new()) ||
@@ -80,7 +80,8 @@ bf_scheduler_new(BFScheduler **sch, PageDB *db) {
      p->max_hard_domain_crawl_rate = -1.0;
      p->max_crawl_depth = 0;
 
-     if (!(p->path = concat(db->path, "bfs", '_')))
+     p->path = path? path: concat(db->path, "bfs", '_');
+     if (!p->path)
           error = "building scheduler path";
      else
           error = make_dir(p->path);

@@ -269,7 +269,7 @@ ffi.cdef(
     } BFScheduler;
 
     BFSchedulerError
-    bf_scheduler_new(BFScheduler **sch, PageDB *db);
+    bf_scheduler_new(BFScheduler **sch, PageDB *db, const char *path);
 
     BFSchedulerError
     bf_scheduler_add(BFScheduler *sch, const CrawledPage *page);
@@ -323,7 +323,7 @@ ffi.cdef(
     } FreqScheduler;
 
     FreqSchedulerError
-    freq_scheduler_new(FreqScheduler **sch, PageDB *path);
+    freq_scheduler_new(FreqScheduler **sch, PageDB *db, const char *path);
 
     FreqSchedulerError
     freq_scheduler_load_simple(FreqScheduler *sch,

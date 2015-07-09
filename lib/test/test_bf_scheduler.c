@@ -13,7 +13,7 @@ test_bf_scheduler_requests(CuTest *tc) {
      db->persist = 0;
 
      BFScheduler *sch;
-     ret = bf_scheduler_new(&sch, db);
+     ret = bf_scheduler_new(&sch, db, 0);
      CuAssert(tc,
 	      sch != 0? sch->error->message: "NULL",
 	      ret == 0);
@@ -182,7 +182,7 @@ test_bf_scheduler_page_rank(CuTest *tc) {
      db->persist = 0;
 
      BFScheduler *sch;
-     ret = bf_scheduler_new(&sch, db);
+     ret = bf_scheduler_new(&sch, db, 0);
      CuAssert(tc,
 	      sch != 0? sch->error->message: "NULL",
 	      ret == 0);
@@ -220,7 +220,7 @@ test_bf_scheduler_hits(CuTest *tc) {
      db->persist = 0;
 
      BFScheduler *sch;
-     ret = bf_scheduler_new(&sch, db);
+     ret = bf_scheduler_new(&sch, db, 0);
      CuAssert(tc,
 	      sch != 0? sch->error->message: "NULL",
 	      ret == 0);
@@ -257,7 +257,7 @@ test_bf_scheduler_restart(CuTest *tc) {
      db->persist = 1;
 
      BFScheduler *sch;
-     ret = bf_scheduler_new(&sch, db);
+     ret = bf_scheduler_new(&sch, db, 0);
      CuAssert(tc,
 	      sch != 0? sch->error->message: "NULL",
 	      ret == 0);
@@ -294,7 +294,7 @@ test_bf_scheduler_restart(CuTest *tc) {
 	      ret == 0);
      db->persist = 0;
 
-     ret = bf_scheduler_new(&sch, db);
+     ret = bf_scheduler_new(&sch, db, 0);
      CuAssert(tc,
 	      sch != 0? sch->error->message: "NULL",
 	      ret == 0);

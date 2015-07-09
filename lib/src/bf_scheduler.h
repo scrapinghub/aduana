@@ -149,11 +149,12 @@ typedef struct {
  * @param sch Where to create it. `*sch` can be NULL in case of memory error
  * @param db PageDB to attach. Remember it will not be created nor destroyed by
  *           the scheduler
- *
+ * @param path Where to create the scheduler database. Can be NULL in which case
+ *             the path will be the same one as db->path with suffix '_bfs'
  * @return 0 if success, otherwise the error code
  */
 BFSchedulerError
-bf_scheduler_new(BFScheduler **sch, PageDB *db);
+bf_scheduler_new(BFScheduler **sch, PageDB *db, const char *path);
 
 /** Add a new crawled page
  *

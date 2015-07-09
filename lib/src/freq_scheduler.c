@@ -33,7 +33,7 @@ freq_scheduler_add_error(FreqScheduler *sch, const char *message) {
 }
 
 FreqSchedulerError
-freq_scheduler_new(FreqScheduler **sch, PageDB *db) {
+freq_scheduler_new(FreqScheduler **sch, PageDB *db, const char *path) {
      FreqScheduler *p = *sch = malloc(sizeof(*p));
      if (p == 0)
           return freq_scheduler_error_memory;
@@ -51,7 +51,8 @@ freq_scheduler_new(FreqScheduler **sch, PageDB *db) {
 
      // create directory if not present yet
      char *error = 0;
-     if (!(p->path = concat(db->path, "freqs", '_')))
+     p->path = path? path: concat(db->path, "freqs", '_');
+     if (!p->path)
           error = "building scheduler path";
      else
           error = make_dir(p->path);
