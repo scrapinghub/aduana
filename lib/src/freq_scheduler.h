@@ -76,6 +76,12 @@ freq_scheduler_cursor_commit(FreqScheduler *sch, MDB_cursor *cursor);
 void
 freq_scheduler_cursor_abort(FreqScheduler *sch, MDB_cursor *cursor);
 
+FreqSchedulerError
+freq_scheduler_cursor_write(FreqScheduler *sch,
+			    MDB_cursor *cursor,
+			    uint64_t hash,
+			    float freq);
+
 
 #if (defined TEST) && TEST
 #include "CuTest.h"

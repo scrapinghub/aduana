@@ -389,6 +389,21 @@ ffi.cdef(
 
     void
     freq_scheduler_delete(FreqScheduler *sch);
+
+    FreqSchedulerError
+    freq_scheduler_cursor_open(FreqScheduler *sch, void **cursor);
+
+    FreqSchedulerError
+    freq_scheduler_cursor_commit(FreqScheduler *sch, void *cursor);
+
+    void
+    freq_scheduler_cursor_abort(FreqScheduler *sch, void *cursor);
+
+    FreqSchedulerError
+    freq_scheduler_cursor_write(FreqScheduler *sch,
+                                void *cursor,
+                                uint64_t hash,
+                                float freq);
     """
 )
 

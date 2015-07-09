@@ -409,6 +409,23 @@ class FreqScheduler(object):
         self._c_aduana.freq_scheduler_load_simple(
             self._sch[0], freq_default, freq_scale or -1.0)
 
+    def load(self, freq_iter):
+        cur = ffi.new('void **')
+        ret = self._c_aduana.freq_scheduler_cursor_open(self._sch[0], cur)
+        if ret != 0:
+            raise PageDBException.from_error(self._sch[0].error)
+
+        for page_hash, page_freq in freq_iter:
+            self._c_aduana.freq_scheduler_cursor_write(
+                self._sch[0],
+                cur[0],
+                ffi.cast('uint64_t', page_hash),
+                page_freq
+            )
+        ret = self._c_aduana.freq_scheduler_cursor_commit(self._sch[0], cur[0])
+        if ret != 0:
+            raise PageDBException.from_error(self._sch[0].error)
+
     def add(self, crawled_page):
         return self._core.add(crawled_page)
 

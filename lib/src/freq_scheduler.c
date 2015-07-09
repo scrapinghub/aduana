@@ -154,6 +154,37 @@ freq_scheduler_cursor_abort(FreqScheduler *sch, MDB_cursor *cursor) {
 }
 
 FreqSchedulerError
+freq_scheduler_cursor_write(FreqScheduler *sch,
+			    MDB_cursor *cursor,
+			    uint64_t hash,
+			    float freq) {
+     if (freq <= 0)
+	  return 0;
+
+     ScheduleKey sk = {
+	  .score = 0,
+	  .hash  = hash
+     };
+     MDB_val key = {
+	  .mv_size = sizeof(sk),
+	  .mv_data = &sk,
+     };
+
+     MDB_val val = {
+	  .mv_size = sizeof(float),
+	  .mv_data = &freq,
+     };
+     int mdb_rc;
+     if ((mdb_rc = mdb_cursor_put(cursor, &key, &val, 0)) != 0) {
+	  freq_scheduler_set_error(sch, freq_scheduler_error_internal, __func__);
+	  freq_scheduler_add_error(sch, "adding page to schedule");
+	  freq_scheduler_add_error(sch, mdb_strerror(mdb_rc));
+     }
+     return sch->error->code;
+
+}
+
+FreqSchedulerError
 freq_scheduler_load_simple(FreqScheduler *sch,
                            float freq_default,
                            float freq_scale) {
@@ -180,14 +211,6 @@ freq_scheduler_load_simple(FreqScheduler *sch,
 	      ((sch->max_n_crawls == 0) || (pi->n_crawls < sch->max_n_crawls)) &&
 	      !page_info_is_seed(pi)){
 
-               ScheduleKey sk = {
-                    .score = 0,
-                    .hash  = hash
-               };
-               MDB_val key = {
-                    .mv_size = sizeof(sk),
-                    .mv_data = &sk,
-               };
                float freq = freq_default;
                if (freq_scale > 0) {
                     float rate = page_info_rate(pi);
@@ -195,18 +218,8 @@ freq_scheduler_load_simple(FreqScheduler *sch,
                          freq = freq_scale * rate;
                     }
                }
-	       if (freq > 0) {
-		    MDB_val val = {
-			 .mv_size = sizeof(float),
-			 .mv_data = &freq,
-		    };
-		    int mdb_rc;
-		    if ((mdb_rc = mdb_cursor_put(cursor, &key, &val, 0)) != 0) {
-			 error1 = "adding page to schedule";
-			 error2 = mdb_strerror(mdb_rc);
-			 goto on_error;
-		    }
-	       }
+	       if (freq_scheduler_cursor_write(sch, cursor, hash, freq) != 0)
+		    goto on_error;
           }
           page_info_delete(pi);
      }
