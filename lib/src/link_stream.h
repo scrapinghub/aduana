@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+#include "util.h"
+
 typedef struct {
      int64_t from;
      int64_t to;
