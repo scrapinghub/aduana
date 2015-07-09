@@ -1,3 +1,6 @@
+import warnings
+import re
+
 from _aduana import lib as C_ADUANA
 from _aduana import ffi
 
@@ -450,6 +453,33 @@ class FreqScheduler(object):
     @margin.setter
     def margin(self, value):
         self._sch[0].margin = value
+
+def freq_spec(page_db, path):
+    rules = []
+    with open(path, 'r') as spec:
+        for line in spec:
+            cols = line.split()
+            if len(cols) == 2:
+                rules.append(
+                    (re.compile(cols[0]), cols[1]))
+
+    for page_info in page_db.iter_page_info():
+        for regexp, action in rules:
+            if regexp.match(page_info.url):
+                if action[0] == 'x':
+                    try:
+                        mult = float(action[1:])
+                    except ValueError:
+                        warning.warn("Could not parse multiplier: ", action)
+                    yield hash(page_info), mult*page_info.rate
+                    break # stop after we find a rule
+                else:
+                    try:
+                        interval = float(action)
+                    except ValueError:
+                        warning.warn("Could not parse interval: ", action)
+                    yield hash(page_info), 1.0/interval
+                    break
 
 if __name__ == '__main__':
     db = PageDB('./test_python_bindings')
