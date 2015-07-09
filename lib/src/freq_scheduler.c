@@ -96,18 +96,61 @@ freq_scheduler_new(FreqScheduler **sch, PageDB *db, const char *path) {
      return p->error->code;
 }
 
-static int
-freq_scheduler_open_cursor(MDB_txn *txn, MDB_cursor **cursor) {
+FreqSchedulerError
+freq_scheduler_cursor_open(FreqScheduler *sch, MDB_cursor **cursor) {
+     char *error1 = 0;
+     char *error2 = 0;
+
+     MDB_txn *txn = 0;
+     if (txn_manager_begin(sch->txn_manager, 0, &txn) != 0) {
+          error1 = "starting transaction";
+          error2 = sch->txn_manager->error->message;
+          goto on_error;
+     }
+
      MDB_dbi dbi;
      int mdb_rc =
           mdb_dbi_open(txn, "schedule", MDB_CREATE, &dbi) ||
           mdb_set_compare(txn, dbi, schedule_entry_mdb_cmp_asc) ||
           mdb_cursor_open(txn, dbi, cursor);
 
-     if (mdb_rc != 0)
+     if (mdb_rc != 0) {
           *cursor = 0;
 
-     return mdb_rc;
+	  error1 = "opening cursor";
+	  error2 = mdb_strerror(mdb_rc);
+     }
+
+     return sch->error->code;
+
+on_error:
+     if (txn != 0)
+          txn_manager_abort(sch->txn_manager, txn);
+     freq_scheduler_set_error(sch, freq_scheduler_error_internal, __func__);
+     freq_scheduler_add_error(sch, error1);
+     freq_scheduler_add_error(sch, error2);
+     return sch->error->code;
+}
+
+FreqSchedulerError
+freq_scheduler_cursor_commit(FreqScheduler *sch, MDB_cursor *cursor) {
+     MDB_txn *txn = mdb_cursor_txn(cursor);
+
+     if (txn_manager_commit(sch->txn_manager, txn) != 0) {
+	  if (txn != 0)
+	       txn_manager_abort(sch->txn_manager, txn);
+	  freq_scheduler_set_error(sch, freq_scheduler_error_internal, __func__);
+	  freq_scheduler_add_error(sch, "commiting schedule transaction");
+	  freq_scheduler_add_error(sch, sch->txn_manager->error->message);
+     }
+     return sch->error->code;
+}
+
+void
+freq_scheduler_cursor_abort(FreqScheduler *sch, MDB_cursor *cursor) {
+     if (cursor) {
+	  txn_manager_abort(sch->txn_manager, mdb_cursor_txn(cursor));
+     }
 }
 
 FreqSchedulerError
@@ -124,20 +167,9 @@ freq_scheduler_load_simple(FreqScheduler *sch,
           goto on_error;
      }
 
-     MDB_txn *txn = 0;
-     if (txn_manager_begin(sch->txn_manager, 0, &txn) != 0) {
-          error1 = "starting transaction";
-          error2 = sch->txn_manager->error->message;
-          goto on_error;
-     }
-
-     MDB_cursor *cur = 0;
-     int mdb_rc = freq_scheduler_open_cursor(txn, &cur);
-     if (mdb_rc != 0) {
-          error1 = "opening cursor";
-          error2 = mdb_strerror(mdb_rc);
-          goto on_error;
-     }
+     MDB_cursor *cursor;
+     if (freq_scheduler_cursor_open(sch, &cursor) != 0)
+	  goto on_error;
 
      StreamState ss;
      uint64_t hash;
@@ -168,7 +200,8 @@ freq_scheduler_load_simple(FreqScheduler *sch,
 			 .mv_size = sizeof(float),
 			 .mv_data = &freq,
 		    };
-		    if ((mdb_rc = mdb_cursor_put(cur, &key, &val, 0)) != 0) {
+		    int mdb_rc;
+		    if ((mdb_rc = mdb_cursor_put(cursor, &key, &val, 0)) != 0) {
 			 error1 = "adding page to schedule";
 			 error2 = mdb_strerror(mdb_rc);
 			 goto on_error;
@@ -185,20 +218,18 @@ freq_scheduler_load_simple(FreqScheduler *sch,
      }
      hashinfo_stream_delete(st);
 
-     if (txn_manager_commit(sch->txn_manager, txn) != 0) {
-          error1 = "commiting schedule transaction";
-          error2 = sch->txn_manager->error->message;
-          goto on_error;
-     }
+     if (freq_scheduler_cursor_commit(sch, cursor) != 0)
+	  goto on_error;
 
      return sch->error->code;
 
 on_error:
-     if (txn != 0)
-          txn_manager_abort(sch->txn_manager, txn);
+     freq_scheduler_cursor_abort(sch, cursor);
+
      freq_scheduler_set_error(sch, freq_scheduler_error_internal, __func__);
      freq_scheduler_add_error(sch, error1);
      freq_scheduler_add_error(sch, error2);
+
      return sch->error->code;
 }
 
@@ -206,8 +237,7 @@ FreqSchedulerError
 freq_scheduler_load_mmap(FreqScheduler *sch, MMapArray *freqs) {
      char *error1 = 0;
      char *error2 = 0;
-     MDB_txn *txn = 0;
-     MDB_cursor *cur = 0;
+     MDB_cursor *cursor = 0;
 
      if (txn_manager_expand(
               sch->txn_manager,
@@ -217,17 +247,9 @@ freq_scheduler_load_mmap(FreqScheduler *sch, MMapArray *freqs) {
           goto on_error;
      }
 
-     if (txn_manager_begin(sch->txn_manager, 0, &txn) != 0) {
-          error1 = "starting transaction";
-          error2 = sch->txn_manager->error->message;
-          goto on_error;
-     }
-     int mdb_rc = freq_scheduler_open_cursor(txn, &cur);
-     if (mdb_rc != 0) {
-          error1 = "opening cursor";
-          error2 = mdb_strerror(mdb_rc);
-          goto on_error;
-     }
+     if (freq_scheduler_cursor_open(sch, &cursor) != 0)
+	  goto on_error;
+
      for (size_t i=0; i<freqs->n_elements; ++i) {
           PageFreq *f = mmap_array_idx(freqs, i);
           ScheduleKey sk = {
@@ -242,26 +264,25 @@ freq_scheduler_load_mmap(FreqScheduler *sch, MMapArray *freqs) {
                .mv_size = sizeof(float),
                .mv_data = &f->freq,
           };
-          if ((mdb_rc = mdb_cursor_put(cur, &key, &val, 0)) != 0) {
+	  int mdb_rc;
+          if ((mdb_rc = mdb_cursor_put(cursor, &key, &val, 0)) != 0) {
                error1 = "adding page to schedule";
                error2 = mdb_strerror(mdb_rc);
                goto on_error;
           }
      }
-     if (txn_manager_commit(sch->txn_manager, txn) != 0) {
-          error1 = "commiting schedule transaction";
-          error2 = sch->txn_manager->error->message;
-          goto on_error;
-     }
+     if (freq_scheduler_cursor_commit(sch, cursor) != 0)
+	  goto on_error;
 
      return sch->error->code;
 
 on_error:
-     if (txn != 0)
-          txn_manager_abort(sch->txn_manager, txn);
+     freq_scheduler_cursor_abort(sch, cursor);
+
      freq_scheduler_set_error(sch, freq_scheduler_error_internal, __func__);
      freq_scheduler_add_error(sch, error1);
      freq_scheduler_add_error(sch, error2);
+
      return sch->error->code;
 }
 
@@ -272,21 +293,10 @@ freq_scheduler_request(FreqScheduler *sch,
      char *error1 = 0;
      char *error2 = 0;
 
-     MDB_txn *txn = 0;
-     MDB_cursor *cur = 0;
+     MDB_cursor *cursor = 0;
 
-     if (txn_manager_begin(sch->txn_manager, 0, &txn) != 0) {
-          error1 = "starting transaction";
-          error2 = sch->txn_manager->error->message;
-          goto on_error;
-     }
-
-     int mdb_rc = freq_scheduler_open_cursor(txn, &cur);
-     if (mdb_rc != 0) {
-          error1 = "opening cursor";
-          error2 = mdb_strerror(mdb_rc);
-          goto on_error;
-     }
+     if (freq_scheduler_cursor_open(sch, &cursor) != 0)
+	  goto on_error;
 
      PageRequest *req = *request = page_request_new(max_requests);
      if (!req) {
@@ -300,9 +310,10 @@ freq_scheduler_request(FreqScheduler *sch,
           MDB_val val;
           ScheduleKey sk;
           float freq;
+	  int mdb_rc;
 
 	  int crawl = 0;
-          switch (mdb_rc = mdb_cursor_get(cur, &key, &val, MDB_FIRST)) {
+          switch (mdb_rc = mdb_cursor_get(cursor, &key, &val, MDB_FIRST)) {
           case 0:
 	       // copy data before deleting cursor
                sk = *(ScheduleKey*)key.mv_data;
@@ -325,7 +336,7 @@ freq_scheduler_request(FreqScheduler *sch,
 		    crawl = (sch->max_n_crawls == 0) || (pi->n_crawls < sch->max_n_crawls);
 	       }
 	       if (!interrupt_requests) {
-		    if ((mdb_rc = mdb_cursor_del(cur, 0)) != 0) {
+		    if ((mdb_rc = mdb_cursor_del(cursor, 0)) != 0) {
 			 error1 = "deleting head of schedule";
 			 error2 = mdb_strerror(mdb_rc);
 			 goto on_error;
@@ -340,7 +351,7 @@ freq_scheduler_request(FreqScheduler *sch,
 
 			 val.mv_data = &freq;
 			 key.mv_data = &sk;
-			 if ((mdb_rc = mdb_cursor_put(cur, &key, &val, 0)) != 0) {
+			 if ((mdb_rc = mdb_cursor_put(cursor, &key, &val, 0)) != 0) {
 			      error1 = "moving element inside schedule";
 			      error2 = mdb_strerror(mdb_rc);
 			      goto on_error;
@@ -360,13 +371,13 @@ freq_scheduler_request(FreqScheduler *sch,
                goto on_error;
           }
      }
-     if (txn_manager_commit(sch->txn_manager, txn) != 0) {
-          error1 = "commiting schedule transaction";
-          error2 = sch->txn_manager->error->message;
-          goto on_error;
-     }
-     return 0;
+     if (freq_scheduler_cursor_commit(sch, cursor) != 0)
+	  goto on_error;
+
+     return sch->error->code;
 on_error:
+     freq_scheduler_cursor_abort(sch, cursor);
+
      freq_scheduler_set_error(sch, freq_scheduler_error_internal, __func__);
      freq_scheduler_add_error(sch, error1);
      freq_scheduler_add_error(sch, error2);

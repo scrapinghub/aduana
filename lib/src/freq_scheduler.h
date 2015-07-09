@@ -1,6 +1,8 @@
 #ifndef __FREQ_SCHEDULER_H__
 #define __FREQ_SCHEDULER_H__
 
+#include "lmdb.h"
+
 #include "txn_manager.h"
 #include "scheduler.h"
 #include "util.h"
@@ -64,6 +66,16 @@ freq_scheduler_add(FreqScheduler *sch, const CrawledPage *page);
 
 void
 freq_scheduler_delete(FreqScheduler *sch);
+
+FreqSchedulerError
+freq_scheduler_cursor_open(FreqScheduler *sch, MDB_cursor **cursor);
+
+FreqSchedulerError
+freq_scheduler_cursor_commit(FreqScheduler *sch, MDB_cursor *cursor);
+
+void
+freq_scheduler_cursor_abort(FreqScheduler *sch, MDB_cursor *cursor);
+
 
 #if (defined TEST) && TEST
 #include "CuTest.h"
