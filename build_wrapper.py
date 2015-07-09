@@ -88,6 +88,28 @@ ffi.cdef(
 ffi.cdef(
     """
     typedef struct {
+         char *url;
+         uint64_t linked_from;
+         uint64_t depth;
+         double first_crawl;
+         double last_crawl;
+         uint64_t n_changes;
+         uint64_t n_crawls;
+         float score;
+         uint64_t content_hash_length;
+         char *content_hash;
+    } PageInfo;
+
+    float
+    page_info_rate(const PageInfo *pi);
+
+    int
+    page_info_is_seed(const PageInfo *pi);
+
+    void
+    page_info_delete(PageInfo *pi);
+
+    typedef struct {
         char *url;   /**< ASCII, null terminated string for the page URL*/
         float score; /**< An estimated value of the link score */
     } LinkInfo;
@@ -149,10 +171,35 @@ ffi.cdef(
     page_db_new(PageDB **db, const char *path);
 
     PageDBError
+    page_db_get_info(PageDB *db, uint64_t hash, PageInfo **pi);
+
+    PageDBError
     page_db_delete(PageDB *db);
 
     void
     page_db_set_persist(PageDB *db, int value);
+
+    typedef enum {
+         stream_state_init,
+         stream_state_next,
+         stream_state_end,
+         stream_state_error
+     } StreamState;
+
+    typedef struct {
+         PageDB *db;
+         void *cur;
+         StreamState state;
+    } HashInfoStream;
+
+    PageDBError
+    hashinfo_stream_new(HashInfoStream **st, PageDB *db);
+
+    StreamState
+    hashinfo_stream_next(HashInfoStream *st, uint64_t *hash, PageInfo **pi);
+
+    void
+    hashinfo_stream_delete(HashInfoStream *st);
     """
 )
 

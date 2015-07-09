@@ -1,6 +1,9 @@
 from _aduana import lib as C_ADUANA
 from _aduana import ffi
 
+########################################################################
+# PageDB Wrappers
+########################################################################
 class PageDBException(Exception):
     @classmethod
     def from_error(cls, c_error):
@@ -18,9 +21,7 @@ class PageDBException(Exception):
             r += " (code={0})".format(self.code)
         return r
 
-########################################################################
-# CrawledPage Wrappers
-########################################################################
+
 class CrawledPage(object):
     def __init__(self, url, links=[]):
         """Parameters:
@@ -88,9 +89,35 @@ class CrawledPage(object):
     def __del__(self):
         self._c_aduana.crawled_page_delete(self._crawled_page)
 
-########################################################################
-# PageDB Wrappers
-########################################################################
+
+class PageInfo(object):
+    def __init__(self, page_hash, c_page_info):
+        self._c_aduana = C_ADUANA
+
+        self._page_info = c_page_info
+        self._hash = page_hash
+
+    @property
+    def url(self):
+        return ffi.string(self._page_info.url)
+
+    def __getattr__(self, name):
+        return getattr(self._page_info, name)
+
+    def __del__(self):
+        self._c_aduana.page_info_delete(self._page_info)
+
+    def __hash__(self):
+        return self._hash
+
+    @property
+    def rate(self):
+        return self._c_aduana.page_info_rate(self._page_info)
+
+    @property
+    def is_seed(self):
+        return self._c_aduana.page_info_is_seed(self._page_info)
+
 class PageDB(object):
     @staticmethod
     def urlhash(url):
@@ -121,6 +148,29 @@ class PageDB(object):
     def __del__(self):
         self._c_aduana.page_db_delete(self._page_db[0])
 
+    def iter_page_info(self):
+        st = ffi.new('HashInfoStream **')
+        ret = self._c_aduana.hashinfo_stream_new(st, self._page_db[0])
+        if ret != 0:
+            raise PageDBException.from_error(self._page_db[0].error)
+
+        page_hash = ffi.new('uint64_t *')
+        pi = ffi.new('PageInfo **')
+        while True:
+            ss = self._c_aduana.hashinfo_stream_next(st[0], page_hash, pi)
+            if ss != self._c_aduana.stream_state_next:
+                break
+            yield PageInfo(page_hash[0], pi[0])
+
+        self._c_aduana.hashinfo_stream_delete(st[0])
+
+    def page_info(self, page_hash):
+        pi = ffi.new('PageInfo **')
+        ret = self._c_aduana.page_db_get_info(
+            self._page_db[0], ffi.cast('uint64_t', page_hash), pi)
+        if ret != 0:
+            raise PageDBException.from_error(self._page_db[0].error)
+        return PageInfo(page_hash, pi[0])
 
 ########################################################################
 # Scorers
