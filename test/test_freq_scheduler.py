@@ -50,3 +50,6 @@ def test_freq_spec():
         r2 = expected[urls[i]]/expected[urls[i+1]]
 
         assert r2 - 1e-3 <= r1 <= r2 + 1e-3
+
+    sch.close()
+    page_db.close()

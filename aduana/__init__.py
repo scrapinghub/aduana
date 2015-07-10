@@ -1,5 +1,7 @@
+import functools
 import warnings
 import re
+
 
 from _aduana import lib as C_ADUANA
 from _aduana import ffi
@@ -7,7 +9,7 @@ from _aduana import ffi
 ########################################################################
 # PageDB Wrappers
 ########################################################################
-class PageDBException(Exception):
+class AduanaException(Exception):
     @classmethod
     def from_error(cls, c_error):
         return cls(
@@ -15,14 +17,17 @@ class PageDBException(Exception):
             code = C_ADUANA.error_code(c_error))
 
     def __init__(self, message, code=None):
-        self.message = message
+        if isinstance(message, basestring):
+            self.message = message
+        else:
+            self.message = ffi.string(self.message)
         self.code = code
 
     def __str__(self):
-        r = ffi.string(self.message)
         if self.code:
-            r += " (code={0})".format(self.code)
-        return r
+            return "{0} (code={1})".format(self.message, self.code)
+        else:
+            return self.message
 
 
 class CrawledPage(object):
@@ -39,7 +44,7 @@ class CrawledPage(object):
 
         self._crawled_page = self._c_aduana.crawled_page_new(url)
         if not self._crawled_page:
-            raise PageDBException(
+            raise AduanaException(
                 "Error inside crawled_page_new: returned NULL")
 
         for pair in links:
@@ -55,7 +60,7 @@ class CrawledPage(object):
                 url,
                 ffi.cast("float", score))
             if ret != 0:
-                raise PageDBException(
+                raise AduanaException(
                     "Error inside crawled_page_add_link: returned %d" % ret)
 
     @property
@@ -79,7 +84,7 @@ class CrawledPage(object):
         ret = self._c_aduana.crawled_page_set_hash64(
             self._crawled_page, ffi.cast('uint64_t', value))
         if ret != 0:
-            raise PageDBException(
+            raise AduanaException(
                 "Error inside crawled_page_set_hash64: returned %d" % ret)
 
     @property
@@ -129,6 +134,28 @@ class PageInfo(object):
     def is_seed(self):
         return self._c_aduana.page_info_is_seed(self._page_info)
 
+
+def only_if_open(f):
+    @functools.wraps(f)
+    def dec(*args, **kwargs):
+        obj = args[0]
+        if not obj.closed:
+            return f(*args, **kwargs)
+        else:
+            raise AduanaException('Object has already been closed')
+
+    return dec
+
+def close_method(f):
+    @functools.wraps(f)
+    def dec(*args, **kwargs):
+        obj = args[0]
+        if not obj._closed:
+            obj._closed = True
+            return f(*args, **kwargs)
+
+    return dec
+
 class PageDB(object):
     @staticmethod
     def urlhash(url):
@@ -138,32 +165,44 @@ class PageDB(object):
         # save to make sure lib is available at destruction time
         self._c_aduana = C_ADUANA
 
+        self._closed = False
         self._page_db = ffi.new('PageDB **')
         ret = self._c_aduana.page_db_new(self._page_db, path)
         if ret != 0:
             if self._page_db:
-                raise PageDBException.from_error(self._page_db[0].error)
+                raise AduanaException.from_error(self._page_db[0].error)
             else:
-                raise PageDBException("Error inside page_db_new", ret)
+                raise AduanaException("Error inside page_db_new", ret)
 
         self.persist = persist
 
     @property
+    def closed(self):
+        return self._closed
+
+    @property
+    @only_if_open
     def persist(self):
         return self._page_db[0].persist
 
     @persist.setter
+    @only_if_open
     def persist(self, value):
         self._c_aduana.page_db_set_persist(self._page_db[0], value)
 
     def __del__(self):
+        self.close()
+
+    @close_method
+    def close(self):
         self._c_aduana.page_db_delete(self._page_db[0])
 
+    @only_if_open
     def iter_page_info(self):
         st = ffi.new('HashInfoStream **')
         ret = self._c_aduana.hashinfo_stream_new(st, self._page_db[0])
         if ret != 0:
-            raise PageDBException.from_error(self._page_db[0].error)
+            raise AduanaException.from_error(self._page_db[0].error)
 
         page_hash = ffi.new('uint64_t *')
         pi = ffi.new('PageInfo **')
@@ -175,14 +214,16 @@ class PageDB(object):
 
         self._c_aduana.hashinfo_stream_delete(st[0])
 
+    @only_if_open
     def page_info(self, page_hash):
         pi = ffi.new('PageInfo **')
         ret = self._c_aduana.page_db_get_info(
             self._page_db[0], ffi.cast('uint64_t', page_hash), pi)
         if ret != 0:
-            raise PageDBException.from_error(self._page_db[0].error)
+            raise AduanaException.from_error(self._page_db[0].error)
         return PageInfo(page_hash, pi[0])
 
+    @only_if_open
     def add(self, crawled_page):
         self._c_aduana.page_db_add(
             self._page_db[0],
@@ -196,37 +237,55 @@ class PageRankScorer(object):
     def __init__(self, page_db):
         self._c_aduana = C_ADUANA
 
+        self._closed = False
         self._scorer = ffi.new('PageRankScorer **')
         self._c_aduana.page_rank_scorer_new(self._scorer, page_db._page_db[0])
 
-    def __del__(self):
-        self._c_aduana.page_rank_scorer_delete(self._scorer[0])
+    @property
+    def closed(self):
+        return self._closed
 
+    def __del__(self):
+        self.close()
+
+    @close_method
+    def close(self):
+        if not self._closed:
+            self._closed = True
+            self._c_aduana.page_rank_scorer_delete(self._scorer[0])
+
+    @only_if_open
     def setup(self, scorer):
         self._c_aduana.page_rank_scorer_setup(self._scorer[0], scorer)
 
     @property
+    @only_if_open
     def persist(self):
         return self._scorer[0].persist
 
     @persist.setter
+    @only_if_open
     def persist(self, value):
         self._c_aduana.page_rank_scorer_set_persist(self._scorer[0], value)
 
     @property
+    @only_if_open
     def use_content_scores(self):
         return self._scorer[0].use_content_scores
 
     @use_content_scores.setter
+    @only_if_open
     def use_content_scores(self, value):
         self._c_aduana.page_rank_scorer_set_use_content_scores(
             self._scorer[0], 1 if value else 0)
 
     @property
+    @only_if_open
     def damping(self):
         return self._scorer[0].page_rank.damping
 
     @damping.setter
+    @only_if_open
     def damping(self, value):
         self._c_aduana.page_rank_scorer_set_damping(self._scorer[0], value)
 
@@ -234,28 +293,42 @@ class HitsScorer(object):
     def __init__(self, page_db):
         self._c_aduana = C_ADUANA
 
+        self._closed = False
         self._scorer = ffi.new('HitsScorer **')
         self._c_aduana.hits_scorer_new(self._scorer, page_db._page_db[0])
 
+    @property
+    def closed(self):
+        return self._closed
+
     def __del__(self):
+        self.close()
+
+    @close_method
+    def close(self):
         self._c_aduana.hits_scorer_delete(self._scorer[0])
 
+    @only_if_open
     def setup(self, scorer):
         self._c_aduana.hits_scorer_setup(self._scorer[0], scorer)
 
     @property
+    @only_if_open
     def persist(self):
         return self._scorer[0].persist
 
     @persist.setter
+    @only_if_open
     def persist(self, value):
         self._c_aduana.hits_scorer_set_persist(self._scorer[0], value)
 
     @property
+    @only_if_open
     def use_content_scores(self):
         return self._scorer[0].use_content_scores
 
     @use_content_scores.setter
+    @only_if_open
     def use_content_scores(self, value):
         self._c_aduana.hits_scorer_set_use_content_scores(
             self._scorer[0], 1 if value else 0)
@@ -274,17 +347,17 @@ class SchedulerCore(object):
     def add(self, crawled_page):
         # better to signal this as an error here than in bf_scheduler_add
         if not isinstance(crawled_page, CrawledPage):
-            raise PageDBException("argument to function must be a CrawledPage instance")
+            raise AduanaException("argument to function must be a CrawledPage instance")
 
         ret = self._scheduler_add(self._sch[0], crawled_page._crawled_page)
         if ret != 0:
-            raise PageDBException.from_error(self._sch[0].error)
+            raise AduanaException.from_error(self._sch[0].error)
 
     def requests(self, n_pages):
         pReq = ffi.new('PageRequest **')
         ret = self._scheduler_request(self._sch[0], n_pages, pReq)
         if ret != 0:
-            raise PageDBException.from_error(self._sch[0].error)
+            raise AduanaException.from_error(self._sch[0].error)
         reqs = [ffi.string(pReq[0].urls[i]) for i in xrange(pReq[0].n_urls)]
         self._c_aduana.page_request_delete(pReq[0])
         return reqs
@@ -294,6 +367,7 @@ class BFScheduler(object):
         # save to make sure lib is available at destruction time
         self._c_aduana = C_ADUANA
 
+        self._closed = False
         self._page_db = page_db
         self._page_db.persist = persist
 
@@ -311,9 +385,9 @@ class BFScheduler(object):
         )
         if ret != 0:
             if self._sch:
-                raise PageDBException.from_error(self._sch[0].error)
+                raise AduanaException.from_error(self._sch[0].error)
             else:
-                raise PageDBException("Error inside bf_scheduler_new", ret)
+                raise AduanaException("Error inside bf_scheduler_new", ret)
 
         self._c_aduana.bf_scheduler_set_persist(self._sch[0], persist)
 
@@ -322,12 +396,20 @@ class BFScheduler(object):
             self._scorer.setup(self._sch[0].scorer)
             ret = self._c_aduana.bf_scheduler_update_start(self._sch[0])
             if ret != 0:
-                raise PageDBException.from_error(self._sch[0].error)
+                raise AduanaException.from_error(self._sch[0].error)
+
+    @property
+    def closed(self):
+        return self._closed
 
     def __del__(self):
+        self.close()
+
+    @close_method
+    def close(self):
         ret = self._c_aduana.bf_scheduler_update_stop(self._sch[0])
         if ret != 0:
-            raise PageDBException.from_error(self._sch[0].error)
+            raise AduanaException.from_error(self._sch[0].error)
         self._c_aduana.bf_scheduler_delete(self._sch[0])
 
     @classmethod
@@ -362,18 +444,23 @@ class BFScheduler(object):
 
         return scheduler
 
+    @only_if_open
     def add(self, crawled_page):
         return self._core.add(crawled_page)
 
+    @only_if_open
     def requests(self, n_pages):
         return self._core.requests(n_pages)
 
+    @only_if_open
     def set_crawl_rate(self, soft_rate, hard_rate):
         self._c_aduana.bf_scheduler_set_max_domain_crawl_rate(self._sch[0], soft_rate, hard_rate)
 
+    @only_if_open
     def set_max_crawl_depth(self, max_crawl_depth=0):
         self._c_aduana.bf_scheduler_set_max_crawl_depth(self._sch[0], max_crawl_depth)
 
+    @only_if_open
     def set_update_interval(self, update_interval):
         self._c_aduana.bf_scheduler_set_update_interval(self._sch[0], update_interval)
 
@@ -382,6 +469,7 @@ class FreqScheduler(object):
         # save to make sure lib is available at destruction time
         self._c_aduana = C_ADUANA
 
+        self._closed = False
         self._page_db = page_db
         self._page_db.persist = persist
 
@@ -399,11 +487,15 @@ class FreqScheduler(object):
         )
         if ret != 0:
             if self._sch:
-                raise PageDBException.from_error(self._sch[0].error)
+                raise AduanaException.from_error(self._sch[0].error)
             else:
-                raise PageDBException("Error inside freq_scheduler_new", ret)
+                raise AduanaException("Error inside freq_scheduler_new", ret)
 
         self._sch[0].persist = persist
+
+    @property
+    def closed(self):
+        return self._closed
 
     @classmethod
     def from_settings(cls, page_db, settings, logger=None):
@@ -430,15 +522,17 @@ class FreqScheduler(object):
 
         return scheduler
 
+    @only_if_open
     def load_simple(self, freq_default=1.0, freq_scale=None):
         self._c_aduana.freq_scheduler_load_simple(
             self._sch[0], freq_default, freq_scale or -1.0)
 
+    @only_if_open
     def load(self, freq_iter):
         cur = ffi.new('void **')
         ret = self._c_aduana.freq_scheduler_cursor_open(self._sch[0], cur)
         if ret != 0:
-            raise PageDBException.from_error(self._sch[0].error)
+            raise AduanaException.from_error(self._sch[0].error)
 
         for page_hash, page_freq in freq_iter:
             self._c_aduana.freq_scheduler_cursor_write(
@@ -449,30 +543,40 @@ class FreqScheduler(object):
             )
         ret = self._c_aduana.freq_scheduler_cursor_commit(self._sch[0], cur[0])
         if ret != 0:
-            raise PageDBException.from_error(self._sch[0].error)
+            raise AduanaException.from_error(self._sch[0].error)
 
+    @only_if_open
     def add(self, crawled_page):
         return self._core.add(crawled_page)
 
+    @only_if_open
     def requests(self, n_pages):
         return self._core.requests(n_pages)
 
     def __del__(self):
+        self.close()
+
+    @close_method
+    def close(self):
         self._c_aduana.freq_scheduler_delete(self._sch[0])
 
     @property
+    @only_if_open
     def max_n_crawls(self):
         return self._sch[0].max_n_crawls
 
     @max_n_crawls.setter
+    @only_if_open
     def max_n_crawls(self, value):
         self._sch[0].max_n_crawls = value
 
     @property
+    @only_if_open
     def margin(self):
         return self._sch[0].margin
 
     @margin.setter
+    @only_if_open
     def margin(self, value):
         self._sch[0].margin = value
 

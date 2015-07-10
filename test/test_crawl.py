@@ -58,12 +58,16 @@ def web():
 
 def depth_crawl(web, depth):
     random.seed(42)
-    backend = aduana.frontera.Backend(aduana.BFScheduler.from_settings(
-        aduana.PageDB(tempfile.mkdtemp(prefix='test-', dir='./')),
-        settings={
-            'MAX_CRAWL_DEPTH': depth
-        }
-    ))
+    page_db = aduana.PageDB(tempfile.mkdtemp(prefix='test-', dir='./'))
+    backend = aduana.frontera.Backend(
+        aduana.BFScheduler.from_settings(
+            page_db,
+            settings={
+                'MAX_CRAWL_DEPTH': depth
+            }
+        )
+    )
+    backend.frontier_start()
     backend.add_seeds([FakeLink('https://news.ycombinator.com/', 1.0)])
 
     crawled = []
@@ -82,6 +86,8 @@ def depth_crawl(web, depth):
     )
     for page in crawled:
         assert dist[page] <= (depth - 1)
+
+    backend.frontier_stop()
 
 def test_depth_crawl_1(web):
     depth_crawl(web, 1)

@@ -43,7 +43,8 @@ class Backend(frontera.Backend):
         pass
 
     def frontier_stop(self):
-        pass
+        self._scheduler.close()
+        self._scheduler._page_db.close()
 
     def add_seeds(self, seeds):
         self._scheduler.add(
@@ -114,7 +115,8 @@ class WebBackend(frontera.Backend):
         pass
 
     def frontier_stop(self):
-        pass
+        self._scheduler.close()
+        self._scheduler._page_db.close()
 
     def add_seeds(self, seeds):
         pass
