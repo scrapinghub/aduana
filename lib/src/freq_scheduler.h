@@ -82,6 +82,8 @@ freq_scheduler_cursor_write(FreqScheduler *sch,
 			    uint64_t hash,
 			    float freq);
 
+FreqSchedulerError
+freq_scheduler_dump(FreqScheduler *sch, FILE *output);
 
 #if (defined TEST) && TEST
 #include "CuTest.h"

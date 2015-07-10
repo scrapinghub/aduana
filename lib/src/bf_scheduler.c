@@ -80,7 +80,7 @@ bf_scheduler_new(BFScheduler **sch, PageDB *db, const char *path) {
      p->max_hard_domain_crawl_rate = -1.0;
      p->max_crawl_depth = 0;
 
-     p->path = path? path: concat(db->path, "bfs", '_');
+     p->path = path? strdup(path): concat(db->path, "bfs", '_');
      if (!p->path)
           error = "building scheduler path";
      else

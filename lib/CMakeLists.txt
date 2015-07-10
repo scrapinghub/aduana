@@ -80,8 +80,11 @@ add_executable(page_db_links src/page_db_links.c)
 target_link_libraries(page_db_links aduana)
 add_executable(page_db_path src/page_db_path.c)
 target_link_libraries(page_db_path aduana)
+add_executable(freq_scheduler_dump src/freq_scheduler_dump.c)
+target_link_libraries(freq_scheduler_dump aduana)
 
 # Installation
 #############################################################
 install(TARGETS aduana DESTINATION lib)
-install(TARGETS page_db_dump page_db_find page_db_links page_db_path DESTINATION bin)
+install(TARGETS page_db_dump page_db_find page_db_links page_db_path freq_scheduler_dump
+        DESTINATION bin)

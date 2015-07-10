@@ -51,14 +51,14 @@ freq_scheduler_new(FreqScheduler **sch, PageDB *db, const char *path) {
 
      // create directory if not present yet
      char *error = 0;
-     p->path = path? path: concat(db->path, "freqs", '_');
+     p->path = path? strdup(path): concat(db->path, "freqs", '_');
      if (!p->path)
           error = "building scheduler path";
      else
           error = make_dir(p->path);
 
      if (error != 0) {
-          freq_scheduler_set_error(p, page_db_error_invalid_path, __func__);
+          freq_scheduler_set_error(p, freq_scheduler_error_invalid_path, __func__);
           freq_scheduler_add_error(p, error);
           return p->error->code;
      }
@@ -427,6 +427,43 @@ freq_scheduler_delete(FreqScheduler *sch) {
      free(sch);
 }
 
+FreqSchedulerError
+freq_scheduler_dump(FreqScheduler *sch, FILE *output) {
+     MDB_cursor *cursor;
+     if (freq_scheduler_cursor_open(sch, &cursor) != 0)
+	  return sch->error->code;
+
+     int end = 0;
+     MDB_cursor_op cursor_op = MDB_FIRST;
+     do {
+	  int mdb_rc;
+	  MDB_val key;
+	  MDB_val val;
+	  ScheduleKey *key_data;
+	  float *val_data;
+	  switch (mdb_rc = mdb_cursor_get(cursor, &key, &val, cursor_op)) {
+	  case 0:
+	       key_data = (ScheduleKey*)key.mv_data;
+	       val_data = (float*)val.mv_data;
+	       fprintf(output, "%.2e %016"PRIx64" %.2e\n",
+		       key_data->score, key_data->hash, *val_data);
+	       break;
+	  case MDB_NOTFOUND:
+	       end = 1;
+	       break;
+	  default:
+	       freq_scheduler_set_error(sch, freq_scheduler_error_internal, __func__);
+	       freq_scheduler_add_error(sch, "iterating over database");
+	       freq_scheduler_add_error(sch, mdb_strerror(mdb_rc));
+	       end = 1;
+	       break;
+	  }
+	  cursor_op = MDB_NEXT;
+     } while (!end);
+     freq_scheduler_cursor_abort(sch, cursor);
+
+     return sch->error->code;
+}
 #if (defined TEST) && TEST
 #include "test_freq_scheduler.c"
 #endif // TEST
