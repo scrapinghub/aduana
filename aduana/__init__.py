@@ -82,6 +82,14 @@ class CrawledPage(object):
             raise PageDBException(
                 "Error inside crawled_page_set_hash64: returned %d" % ret)
 
+    @property
+    def time(self):
+        return self._crawled_page.time
+
+    @time.setter
+    def time(self, value):
+        self._crawled_page.time = value
+
     def get_links(self):
         links = []
         for i in xrange(self._c_aduana.crawled_page_n_links(self._crawled_page)):
@@ -175,6 +183,12 @@ class PageDB(object):
             raise PageDBException.from_error(self._page_db[0].error)
         return PageInfo(page_hash, pi[0])
 
+    def add(self, crawled_page):
+        self._c_aduana.page_db_add(
+            self._page_db[0],
+            crawled_page._crawled_page,
+            ffi.NULL
+        )
 ########################################################################
 # Scorers
 ########################################################################
@@ -399,9 +413,17 @@ class FreqScheduler(object):
         if max_n_crawls:
             scheduler.max_n_crawls = max_n_crawls
 
-        freq_default = settings.get('FREQ_DEFAULT', 0.1)
-        freq_scale = settings.get('FREQ_SCALE', -1.0)
-        scheduler.load_simple(freq_default, freq_scale)
+        spec_path = settings.get('FREQ_SPEC', None)
+        if spec_path:
+            if isinstance(spec_path, basestring):
+                with open(spec_path, 'r') as spec:
+                    scheduler.load(freq_spec(page_db, spec))
+            else:
+                scheduler.load(freq_spec(page_db, spec_path))
+        else:
+            freq_default = settings.get('FREQ_DEFAULT', 0.1)
+            freq_scale = settings.get('FREQ_SCALE', -1.0)
+            scheduler.load_simple(freq_default, freq_scale)
 
         freq_margin = settings.get('FREQ_MARGIN', -1.0)
         scheduler.margin = freq_margin
@@ -454,14 +476,13 @@ class FreqScheduler(object):
     def margin(self, value):
         self._sch[0].margin = value
 
-def freq_spec(page_db, path):
+def freq_spec(page_db, spec):
     rules = []
-    with open(path, 'r') as spec:
-        for line in spec:
-            cols = line.split()
-            if len(cols) == 2:
-                rules.append(
-                    (re.compile(cols[0]), cols[1]))
+    for line in spec:
+        cols = line.split()
+        if len(cols) == 2:
+            rules.append(
+                (re.compile(cols[0]), cols[1]))
 
     for page_info in page_db.iter_page_info():
         for regexp, action in rules:

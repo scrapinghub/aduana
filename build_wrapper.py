@@ -174,6 +174,9 @@ ffi.cdef(
     page_db_get_info(PageDB *db, uint64_t hash, PageInfo **pi);
 
     PageDBError
+    page_db_add(PageDB *db, const CrawledPage *page, void **page_info_list);
+
+    PageDBError
     page_db_delete(PageDB *db);
 
     void
