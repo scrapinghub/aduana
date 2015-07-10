@@ -19,7 +19,4 @@ script:
   - make
   - ./test
   - cd ..
-
-# For some reason this is taking forever but works allright on my home PC.
-# I comment it out until I find the problem.
-#  - travis_wait tox
+  - travis_wait tox
