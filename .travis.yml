@@ -19,4 +19,4 @@ script:
   - make
   - ./test
   - cd ..
-  - travis_wait tox
+  - travis_wait tox -vvv
