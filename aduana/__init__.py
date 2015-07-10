@@ -318,7 +318,7 @@ class BFScheduler(object):
 
     @classmethod
     def from_settings(cls, page_db, settings, logger=None):
-        scorer_class = settings.get('SCORER', False)
+        scorer_class = settings.get('SCORER', None)
         if scorer_class is None:
             if logger:
                 logger.backend.warning(

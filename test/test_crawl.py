@@ -2,6 +2,7 @@ import gzip
 import random
 import os
 import os.path
+import tempfile
 
 import pytest
 import networkx as nx
@@ -9,9 +10,6 @@ import networkx as nx
 import aduana
 import aduana.frontera
 
-class FakeLogger(object):
-    def warning(self, message):
-        pass
 
 class FakeResponse(object):
     def __init__(self, url, score=None):
@@ -26,7 +24,7 @@ class FakeLink(object):
                 'score': score or random.random()
             }
         }
-        
+
 class WebGraph(object):
     def __init__(self, nodes, links):
         self.graph = nx.DiGraph()
@@ -35,14 +33,14 @@ class WebGraph(object):
         with gzip.open(nodes) as fn:
             for line in fn:
                 n += 1
-        
+
         idx2url = n*[None]
         with gzip.open(nodes, 'r') as fn:
             for line in fn:
                 url, idx = line.split()
                 idx2url[int(idx)] = url
                 self.graph.add_node(url)
-        
+
         with gzip.open(links, 'r') as fl:
             for line in fl:
                 a, b = map(int, line.split())
@@ -55,13 +53,17 @@ class WebGraph(object):
 def web():
     datadir = os.environ.get('DATAPATH', '.')
     return WebGraph(
-        os.path.join(datadir, 'nodes.txt.gz'), 
+        os.path.join(datadir, 'nodes.txt.gz'),
         os.path.join(datadir, 'links.txt.gz'))
 
 def depth_crawl(web, depth):
     random.seed(42)
-    backend = aduana.frontera.Backend(FakeLogger(),
-                                      max_crawl_depth=depth)
+    backend = aduana.frontera.Backend(aduana.BFScheduler.from_settings(
+        aduana.PageDB(tempfile.mkdtemp(prefix='test-', dir='./')),
+        settings={
+            'MAX_CRAWL_DEPTH': depth
+        }
+    ))
     backend.add_seeds([FakeLink('https://news.ycombinator.com/', 1.0)])
 
     crawled = []
@@ -74,7 +76,7 @@ def depth_crawl(web, depth):
             backend.page_crawled(FakeResponse(req.url), map(FakeLink, links))
 
     dist = nx.single_source_shortest_path_length(
-        web.graph, 
+        web.graph,
         'https://news.ycombinator.com/',
         cutoff=depth
     )
@@ -89,4 +91,3 @@ def test_depth_crawl_2(web):
 
 def test_depth_crawl_3(web):
     depth_crawl(web, 3)
-    
