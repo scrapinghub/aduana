@@ -168,7 +168,7 @@ varint_decode_uint64(uint8_t *in, uint8_t* read) {
 
 uint8_t*
 varint_encode_int64(int64_t n, uint8_t *out) {
-     return varint_encode_uint64(n >= 0? 2*n: 2*abs(n) + 1, out);
+     return varint_encode_uint64(n >= 0? 2*n: 2*llabs(n) + 1, out);
 }
 int64_t
 varint_decode_int64(uint8_t *in, uint8_t* read) {
