@@ -190,6 +190,7 @@ freq_scheduler_load_simple(FreqScheduler *sch,
                            float freq_scale) {
      char *error1 = 0;
      char *error2 = 0;
+     MDB_cursor *cursor = 0;
 
      HashInfoStream *st;
      if (hashinfo_stream_new(&st, sch->page_db) != 0) {
@@ -198,7 +199,6 @@ freq_scheduler_load_simple(FreqScheduler *sch,
           goto on_error;
      }
 
-     MDB_cursor *cursor;
      if (freq_scheduler_cursor_open(sch, &cursor) != 0)
 	  goto on_error;
 

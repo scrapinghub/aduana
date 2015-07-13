@@ -820,6 +820,9 @@ page_db_add(PageDB *db, const CrawledPage *page, PageInfoList **page_info_list) 
      int mdb_rc;
      char *error = 0;
 
+     uint64_t *diff_id = 0;
+     uint64_t *same_id = 0;
+
      // start a new write transaction
      txn = 0;
      if ((txn_manager_begin(db->txn_manager, 0, &txn)) != 0)
@@ -874,9 +877,9 @@ page_db_add(PageDB *db, const CrawledPage *page, PageInfoList **page_info_list) 
 
      size_t n_links = crawled_page_n_links(page);
      // store here links inside the same domain as the crawled page
-     uint64_t *same_id = malloc((n_links + 1)*sizeof(*same_id));
+     same_id = malloc((n_links + 1)*sizeof(*same_id));
      // store here links outside the domain of the crawled page
-     uint64_t *diff_id = malloc((n_links + 1)*sizeof(*diff_id));
+     diff_id = malloc((n_links + 1)*sizeof(*diff_id));
      // next link id is going to be written here
      uint64_t *id = diff_id;
      // number of id's in same_id and diff_id. The first element of diff_id
@@ -1012,7 +1015,7 @@ on_error:
 PageDBError
 page_db_get_info(PageDB *db, uint64_t hash, PageInfo **pi) {
      MDB_txn *txn;
-     MDB_cursor *cur;
+     MDB_cursor *cur = 0;
 
      int mdb_rc;
      char *error = 0;
@@ -1133,6 +1136,8 @@ page_db_get_scores(PageDB *db, MMapArray **scores) {
      char *error1 = 0;
      char *error2 = 0;
 
+     char *pscores = 0;
+
      if ((txn_manager_begin(db->txn_manager, MDB_RDONLY, &txn)) != 0)
           error1 = db->txn_manager->error->message;
      else if ((mdb_rc = page_db_open_hash2info(txn, &cur_hash2info)) != 0)
@@ -1155,7 +1160,7 @@ page_db_get_scores(PageDB *db, MMapArray **scores) {
      }
      size_t n_pages = *(size_t*)val.mv_data;
 
-     char *pscores = build_path(db->path, "scores.bin");
+     pscores = build_path(db->path, "scores.bin");
      if (mmap_array_new(scores, pscores, n_pages, sizeof(float)) != 0) {
           error1 = "creating scores array";
           error2 = *scores? (*scores)->error->message: "memory error";
@@ -1571,7 +1576,7 @@ page_db_link_stream_next(void *st, Link *link) {
           switch (mdb_rc = mdb_cursor_get(es->cur, &key, &val, MDB_NEXT)) {
           case 0:
                if (page_db_link_stream_copy_links(es, &key, &val, es->only_diff_domain) != 0)
-                    return page_db_error_internal;
+                    return stream_state_error;
                break;
           case MDB_NOTFOUND:
                return es->state = stream_state_end;
