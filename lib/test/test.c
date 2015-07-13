@@ -38,10 +38,10 @@ int main(int argc, char **argv) {
 	  CuSuiteRun(suite);                    \
 	  CuSuiteSummary(suite, output);        \
 	  CuSuiteDetails(suite, output);        \
+	  fail_count += suite->failCount;       \
 	  CuSuiteDelete(suite);                 \
 	  printf("%s\n", output->buffer);       \
 	  CuStringDelete(output);               \
-	  fail_count += suite->failCount;       \
      } while(0);
 
      RUN_SUITE("page_db", test_page_db_suite(n_pages));

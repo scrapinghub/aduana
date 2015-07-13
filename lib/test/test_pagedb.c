@@ -1,4 +1,5 @@
 #include "CuTest.h"
+#include "test.h"
 
 /* Tests the loading/dumping of PageInfo from and into LMDB values */
 void
@@ -101,10 +102,7 @@ test_page_db_simple(CuTest *tc) {
           *(float*)mmap_array_idx(scores, idx),
           1e-6);
 
-
-     CuAssert(tc,
-              scores->error->message,
-              mmap_array_delete(scores) == 0);
+     CHECK_DELETE(tc, scores->error->message, mmap_array_delete(scores));
 
      crawled_page_delete(cp1);
      crawled_page_delete(cp2);
@@ -265,9 +263,7 @@ test_page_db_crawl(CuTest *tc) {
 
      CuAssert(tc, hits->error->message, hits_err == 0);
 
-     CuAssert(tc,
-              hits->error->message,
-              hits_delete(hits) == 0);
+     CHECK_DELETE(tc, hits->error->message, hits_delete(hits));
 
      page_db_link_stream_delete(st);
 

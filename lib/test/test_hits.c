@@ -1,5 +1,6 @@
 #include "CuTest.h"
 
+#include "test.h"
 #include "page_db.h"
 
 /* Checks the accuracy of the HITS computation */
@@ -99,9 +100,7 @@ test_hits(CuTest *tc) {
           CuAssertDblEquals(tc, h_scores[i], *h_score, 1e-6);
           CuAssertDblEquals(tc, a_scores[i], *a_score, 1e-6);
      }
-     CuAssert(tc,
-              hits->error->message,
-              hits_delete(hits) == 0);
+     CHECK_DELETE(tc, hits->error->message, hits_delete(hits));
 
      page_db_delete(db);
 }

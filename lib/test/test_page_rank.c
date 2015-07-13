@@ -1,5 +1,6 @@
 #include "CuTest.h"
 
+#include "test.h"
 #include "page_db.h"
 
 /* Checks the accuracy of the PageRank computation */
@@ -136,9 +137,7 @@ test_page_rank(CuTest *tc) {
 
           CuAssertDblEquals(tc, scores[i], *score, 1e-6);
      }
-     CuAssert(tc,
-              pr->error->message,
-              page_rank_delete(pr) == 0);
+     CHECK_DELETE(tc, pr->error->message, page_rank_delete(pr));
 
      // With content scores, damping = 0
      // ------------------------------------------------------------------------
@@ -182,13 +181,8 @@ test_page_rank(CuTest *tc) {
 
           CuAssertDblEquals(tc, scores[idx]/total_score, *score, 1e-6);
      }
-     CuAssert(tc,
-              pr->error->message,
-              page_rank_delete(pr) == 0);
-
-     CuAssert(tc,
-              pr->error->message,
-              mmap_array_delete(pr->scores) == 0);
+     CHECK_DELETE(tc, pr->scores->error->message, mmap_array_delete(pr->scores));
+     CHECK_DELETE(tc, pr->error->message, page_rank_delete(pr));
 
      // With content scores, damping = 0.5
      // ------------------------------------------------------------------------
@@ -236,13 +230,8 @@ test_page_rank(CuTest *tc) {
 
           CuAssertDblEquals(tc, expected_pr[i], *score, 1e-6);
      }
-     CuAssert(tc,
-              pr->error->message,
-              page_rank_delete(pr) == 0);
-
-     CuAssert(tc,
-              pr->error->message,
-              mmap_array_delete(pr->scores) == 0);
+     CHECK_DELETE(tc, pr->scores->error->message, mmap_array_delete(pr->scores));
+     CHECK_DELETE(tc, pr->error->message, page_rank_delete(pr));
 
      page_db_delete(db);
 }
