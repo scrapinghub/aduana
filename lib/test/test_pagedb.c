@@ -4,6 +4,7 @@
 /* Tests the loading/dumping of PageInfo from and into LMDB values */
 void
 test_page_info_serialization(CuTest *tc) {
+     printf("%s\n", __func__);
      MDB_val val;
      PageInfo pi1 = {
           .url                 = "test_url_123",
@@ -39,6 +40,8 @@ test_page_info_serialization(CuTest *tc) {
 /* Tests all the database operations on a very simple crawl of just two pages */
 void
 test_page_db_simple(CuTest *tc) {
+     printf("%s\n", __func__);
+
      char test_dir[] = "test-pagedb-XXXXXX";
      mkdtemp(test_dir);
 
@@ -190,6 +193,8 @@ static size_t test_n_pages = 50000;
 
 static void
 test_page_db_crawl(CuTest *tc) {
+     printf("%s\n", __func__);
+
      char test_dir[] = "test-pagedb-XXXXXX";
      mkdtemp(test_dir);
 
@@ -209,18 +214,15 @@ test_page_db_crawl(CuTest *tc) {
                   "http://test_domain_%zu.org/test_url_%zu", j%100, j);
           links[j].score = j;
      }
-     time_t start = time(0);
-     printf("%s: \n", __func__);
-     for (size_t i=0; i<test_n_pages; ++i) {
-#if 1
+     clock_t start = clock();
+     for (size_t i=1; i<=test_n_pages; ++i) {
           if (i % 10000 == 0) {
-               double delta = difftime(time(0), start);
+               double delta = (double)(clock() - start)/(double)CLOCKS_PER_SEC;
                if (delta > 0) {
-                    printf("%10zuK/%zuK: %9zu pages/sec\n",
-                           i/1000, test_n_pages/1000, i/((size_t)delta));
+                    printf("%10zuK/%zuK: %.0f pages/sec\n",
+                           i/1000, test_n_pages/1000, ((double)i)/delta);
                }
           }
-#endif
           free(links[0].url);
           for (size_t j=0; j<n_links; ++j)
                links[j] = links[j+1];
@@ -272,6 +274,7 @@ test_page_db_crawl(CuTest *tc) {
 
 void
 test_hashidx_stream(CuTest *tc) {
+     printf("%s\n", __func__);
      char test_dir[] = "test-pagedb-XXXXXX";
      mkdtemp(test_dir);
 
@@ -336,6 +339,7 @@ test_hashidx_stream(CuTest *tc) {
 
 void
 test_hashinfo_stream(CuTest *tc) {
+     printf("%s\n", __func__);
      char test_dir[] = "test-pagedb-XXXXXX";
      mkdtemp(test_dir);
 
@@ -405,6 +409,7 @@ test_hashinfo_stream(CuTest *tc) {
 
 void
 test_link_stream(CuTest *tc) {
+     printf("%s\n", __func__);
      char test_dir[] = "test-pagedb-XXXXXX";
      mkdtemp(test_dir);
 

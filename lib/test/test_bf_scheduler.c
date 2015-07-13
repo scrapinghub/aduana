@@ -2,6 +2,7 @@
 
 void
 test_bf_scheduler_requests(CuTest *tc) {
+     printf("%s\n", __func__);
      char test_dir_db[] = "test-bfs-XXXXXX";
      mkdtemp(test_dir_db);
 
@@ -127,18 +128,15 @@ test_bf_scheduler_crawl(CuTest *tc,
 	  links[j].score = ((float)j)/((float)n_pages);
      }
 
-     time_t start = time(0);
-     printf("%s: \n", __func__);
-     for (size_t i=0; i<n_pages; ++i) {
-#if 1
-	  if (i % 10000 == 0) {
-	       double delta = difftime(time(0), start);
-	       if (delta > 0) {
-		    printf("%10zuK/%zuK: %9zu pages/sec\n",
-			   i/1000, n_pages/1000, i/((size_t)delta));
-	       }
-	  }
-#endif
+     clock_t start = clock();
+     for (size_t i=1; i<=n_pages; ++i) {
+          if (i % 10000 == 0) {
+               double delta = (double)(clock() - start)/(double)CLOCKS_PER_SEC;
+               if (delta > 0) {
+                    printf("%10zuK/%zuK: %.0f pages/sec\n",
+                           i/1000, n_pages/1000, ((double)i)/delta);
+               }
+          }
 	  free(links[0].url);
 	  for (size_t j=0; j<n_links; ++j)
 	       links[j] = links[j+1];
@@ -171,6 +169,7 @@ static size_t test_n_pages = 50000;
 /* Tests the typical database operations on a moderate crawl of 10M pages */
 static void
 test_bf_scheduler_page_rank(CuTest *tc) {
+     printf("%s\n", __func__);
      char test_dir_db[] = "test-bfs-XXXXXX";
      mkdtemp(test_dir_db);
 
@@ -209,6 +208,7 @@ test_bf_scheduler_page_rank(CuTest *tc) {
 /* Tests the typical database operations on a moderate crawl of 10M pages */
 static void
 test_bf_scheduler_hits(CuTest *tc) {
+     printf("%s\n", __func__);
      char test_dir_db[] = "test-bfs-XXXXXX";
      mkdtemp(test_dir_db);
 
@@ -246,6 +246,7 @@ test_bf_scheduler_hits(CuTest *tc) {
 
 static void
 test_bf_scheduler_restart(CuTest *tc) {
+     printf("%s\n", __func__);
      char test_dir_db[] = "test-bfs-XXXXXX";
      mkdtemp(test_dir_db);
 

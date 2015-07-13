@@ -6,6 +6,7 @@
 /* Checks the accuracy of the PageRank computation */
 void
 test_page_rank(CuTest *tc) {
+     printf("%s\n", __func__);
      /* Compute the PageRank score of the following graph
       *        +-->2---+
       *        |   |   |

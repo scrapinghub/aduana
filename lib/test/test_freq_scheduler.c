@@ -3,17 +3,17 @@ static size_t test_n_pages = 50000;
 
 static void
 crawl(CuTest *tc, FreqScheduler *sch) {
-     time_t start = time(0);
+     clock_t start = clock();
      size_t n_reqs = 10;
      size_t total = 100*test_n_pages;
-     for (size_t i=0; i<total; ++i) {
-	  if (i % 10000 == 0) {
-	       double delta = difftime(time(0), start);
-	       if (delta > 0) {
-		    printf("%10zuK/%zuK: %9zu pages/sec\n",
-			   i/1000, total/1000, i/((size_t)delta));
-	       }
-	  }
+     for (size_t i=1; i<=total; ++i) {
+          if (i % 10000 == 0) {
+               double delta = (double)(clock() - start)/(double)CLOCKS_PER_SEC;
+               if (delta > 0) {
+                    printf("%10zuK/%zuK: %.0f pages/sec\n",
+                           i/1000, total/1000, ((double)i)/delta);
+               }
+          }
 	  PageRequest *reqs;
 	  CuAssert(tc,
 		   sch->error->message,

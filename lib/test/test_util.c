@@ -2,6 +2,7 @@
 
 void
 test_varint_uint64(CuTest *tc) {
+     printf("%s\n", __func__);
      uint64_t test[] = {
           1000000, 10000, 100, 1, 0
      };
@@ -25,6 +26,7 @@ test_varint_uint64(CuTest *tc) {
 }
 void
 test_varint_int64(CuTest *tc) {
+     printf("%s\n", __func__);
      int64_t test[] = {
           -1000000, 10000, -100, 1, 0
      };
@@ -47,6 +49,7 @@ test_varint_int64(CuTest *tc) {
 
 void
 test_url_domain(CuTest *tc) {
+     printf("%s\n", __func__);
      char *url[] = {
           "https://fr.m.wikipedia.org/wiki/Jeudi",
           "https://apps.hclib.org/catalog/results.cfm?fq=author_f%3AUnited+States.+Congress.+Senate",
@@ -88,6 +91,7 @@ test_url_domain(CuTest *tc) {
 
 void
 test_same_domain(CuTest *tc) {
+     printf("%s\n", __func__);
      CuAssertIntEquals(tc,
                        1,
                        same_domain("http://blablabla/foo",

@@ -2,6 +2,7 @@
 
 void
 test_domain_temp(CuTest *tc) {
+     printf("%s\n", __func__);
      DomainTemp *dh = domain_temp_new(10, 60.0);
      CuAssertPtrNotNull(tc, dh);
 

@@ -6,6 +6,7 @@
 /* Checks the accuracy of the HITS computation */
 void
 test_hits(CuTest *tc) {
+     printf("%s\n", __func__);
      /* Compute the HITS score of the following graph
       *        +-->2---+
       *        |   |   |
