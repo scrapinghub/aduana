@@ -619,7 +619,7 @@ Data structures
 Constructor/Destructor
 ~~~~~~~~~~~~~~~~~~~~~~
 
-.. doxygenfunction:: bf_scheduler_new(BFScheduler **, PageDB *)
+.. doxygenfunction:: bf_scheduler_new(BFScheduler **, PageDB *, const char *path)
 
 .. doxygenfunction:: bf_scheduler_delete(BFScheduler *)
 
@@ -651,6 +651,50 @@ Settings
 .. doxygendefine:: BF_SCHEDULER_CRAWL_RATE_STEPS
 
 .. doxygenfunction:: bf_scheduler_set_max_domain_crawl_rate(BFScheduler *, float, float)
+
+FreqScheduler
+-----------
+
+Data structures
+~~~~~~~~~~~~~~~
+
+.. doxygendefine:: FREQ_SCHEDULER_DEFAULT_SIZE
+
+.. doxygendefine:: FREQ_SCHEDULER_DEFAULT_PERSIST
+
+.. doxygenstruct:: FreqScheduler
+   :members:
+
+.. doxygenenum:: FreqSchedulerError
+
+Constructor/Destructor
+~~~~~~~~~~~~~~~~~~~~~~
+
+.. doxygenfunction:: freq_scheduler_new(FreqScheduler **, PageDB *, const char *)
+
+.. doxygenfunction:: freq_scheduler_delete(FreqScheduler *)
+
+Input/Output
+~~~~~~~~~~~~
+
+.. doxygenfunction:: freq_scheduler_add(FreqScheduler *, const CrawledPage *)
+
+.. doxygenfunction:: freq_scheduler_request(FreqScheduler *, size_t, PageRequest **)
+
+Setting the schedule
+~~~~~~~~~~~~~~~~~~~~
+
+.. doxygenfunction:: freq_scheduler_load_simple(FreqScheduler *, float, float)
+
+.. doxygenfunction:: freq_scheduler_load_mmap(FreqScheduler *, MMapArray *)
+
+.. doxygenfunction:: freq_scheduler_cursor_open(FreqScheduler *, MDB_cursor **)
+
+.. doxygenfunction:: freq_scheduler_cursor_commit(FreqScheduler *, MDB_cursor *)
+
+.. doxygenfunction:: freq_scheduler_cursor_abort(FreqScheduler *, MDB_cursor *)
+
+.. doxygenfunction:: freq_scheduler_cursor_write(FreqScheduler *, MDB_cursor *, uint64_t, float)
 
 Scorer
 ------
