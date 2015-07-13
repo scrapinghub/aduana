@@ -22,6 +22,9 @@ typedef struct {
 /** Size of the mmap to store the schedule */
 #define FREQ_SCHEDULER_DEFAULT_SIZE PAGE_DB_DEFAULT_SIZE
 
+/** Don't persist by default */
+#define FREQ_SCHEDULER_DEFAULT_PERSIST 0
+
 typedef enum {
      freq_scheduler_error_ok = 0,       /**< No error */
      freq_scheduler_error_memory,       /**< Error allocating memory */
@@ -42,9 +45,11 @@ typedef struct {
      /** If positive, do not crawl above this margin frequency.
       *
       * More exactly, pause crawl (do not return more requests) if:
-      *                                                  1
-      *     current_time - last_crawl_time < --------------------------
-      *                                      frequency * (1.0 + margin)
+      * @verbatim
+                                                        1
+           current_time - last_crawl_time < --------------------------
+                                            frequency * (1.0 + margin)
+	@endverbatim
       */
      float margin;
      /** Do not crawl more than this specified number of times */

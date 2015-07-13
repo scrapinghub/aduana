@@ -45,7 +45,7 @@ freq_scheduler_new(FreqScheduler **sch, PageDB *db, const char *path) {
      }
 
      p->page_db = db;
-     p->persist = 0;
+     p->persist = FREQ_SCHEDULER_DEFAULT_PERSIST;
      p->margin = -1.0; // disabled
      p->max_n_crawls = 0;
 
