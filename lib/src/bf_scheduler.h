@@ -169,12 +169,11 @@ BFSchedulerError
 bf_scheduler_add(BFScheduler *sch, const CrawledPage *page);
 
 
-/** Add a new crawled page
- *
- * It will add the page also to the PageDB.
+/** Return new pages to be crawled
  *
  * @param sch
- * @param page
+ * @param n_pages Maximum number of @ref PageRequest to return
+ * @param request An array of at most n_pages elements
  *
  * @return 0 if success, otherwise the error code
  */
