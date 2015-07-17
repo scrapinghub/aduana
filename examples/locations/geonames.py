@@ -1,11 +1,15 @@
 import collections
+import codecs
 import itertools
 import logging
 import os.path
 import zipfile
 
+import marisa_trie
 import nltk
 import requests
+import numpy as np
+
 
 def extract_gpe(t):
     """Extract GPEs (Geo-Political Entity) from an annotated tree"""
@@ -22,26 +26,40 @@ def extract_gpe(t):
             locations += extract_gpe(child)
         return locations
 
+
+def download(filename, url):
+    """If filename is not present then download from url"""
+    if not os.path.isfile(filename):
+        logging.warning(
+            'Could not find filename {0}. Downloading it now...'.format(filename))
+        r = requests.get(url, stream=True)
+        with open(filename, 'wb') as f:
+            for i, chunk in enumerate(r.iter_content(chunk_size=1024*1024)):
+                f.write(chunk)
+                if i % 50 == 0:
+                    logging.info('{0}: {1: 4d}MB'.format(filename, i))
+
+
 class GeoNamesRow(object):
     def __init__(self, line):
-        (self.gid, 
-         self.name, 
-         self.asciiname, 
-         self.alternates, 
-         self.lat, 
-         self.lon, 
-         self.feature_class, 
-         self.feature, 
-         self.country, 
-         self.alternate_country, 
-         self.admin1, 
-         self.admin2, 
+        (self.gid,
+         self.name,
+         self.asciiname,
+         self.alternates,
+         self.lat,
+         self.lon,
+         self.feature_class,
+         self.feature,
+         self.country,
+         self.alternate_country,
+         self.admin1,
+         self.admin2,
          self.admin3,
-         self.admin4, 
-         self.population, 
-         self.elevation, 
-         self.dem, 
-         self.timezone, 
+         self.admin4,
+         self.population,
+         self.elevation,
+         self.dem,
+         self.timezone,
          self.modification) = line.split('\t')
 
         self.gid = int(self.gid)
@@ -56,41 +74,49 @@ class GeoNamesRow(object):
 
         self.alternates = self.alternates.split(',')
 
-class GeoNames(object):       
-    def __init__(self, datafile='allCountries.zip'):
-        if not os.path.isfile(datafile):
-            logging.warning(
-                'Could not file datafile {0}. Downloading it now...'.format(datafile))
-            r = requests.get(
-                'http://download.geonames.org/export/dump/allCountries.zip',
-                stream=True)
-            with open(datafile, 'wb') as f:
-                for i, chunk in enumerate(r.iter_content(chunk_size=1024*1024)):
-                    f.write(chunk)
-                    if i % 50 == 0:
-                        logging.info('{0}: {1: 4d}MB'.format(datafile, i))
+    def all_names(self):
+        yield self.name
+        for name in self.alternates:
+            yield name
 
-        self._names = collections.defaultdict(list)
+
+class GeoNames(object):
+    def __init__(self, datafile='allCountries.zip'):
+        download(datafile,
+                'http://download.geonames.org/export/dump/allCountries.zip')
+
+        self._max_gid = 0
+        def rows(data):
+            for row in itertools.imap(
+                    GeoNamesRow,
+                    codecs.iterdecode(data.open('allCountries.txt', 'r'), 'utf-8')):
+                self._max_gid = max(self._max_gid, row.gid)
+                yield row
+
         self._extra = {}
         with zipfile.ZipFile(datafile) as data:
             i = 0
-            for row in itertools.imap(GeoNamesRow,
-                                      data.open('allCountries.txt', 'r')):
-                i += 1
-                if i % 100000 == 0:
-                    logging.info("{0}K".format(i/1000))
+            self._names = marisa_trie.Trie(name
+                                           for row in rows(data)
+                                           for name in row.all_names())
 
-                self._extra[row.gid] = (row.population, row.lat, row.lon)
-                names = [row.name] + row.alternates
-                for n in names:
-                    if n:
-                        self._names[n].append(row.gid)
+            self._gid = np.empty(shape=(len(self._names),), dtype=object)
+            self._extra = np.zeros(shape=(self._max_gid + 1, 3), dtype=float)
+            for row in rows(data):
+                for name in row.all_names():
+                    idx = self._names[name]
+                    if self._gid[idx] is None:
+                        self._gid[idx] = [row.gid]
+                    else:
+                        self._gid[idx].append(row.gid)
+
+                self._extra[row.gid, :] = row.population, row.lat, row.lon
 
     def count(self, text, names=True):
         """Count number of occurences of locations inside text.
 
-        Returns a dictionary where each key is a location, given either by 
-        name or by id, depending on the value of the 'names' parameter. 
+        Returns a dictionary where each key is a location, given either by
+        name or by id, depending on the value of the 'names' parameter.
         The values are the number of occurences.
 
         In case of ambiguity this method will select the location with highest
@@ -109,21 +135,27 @@ class GeoNames(object):
                     total[loc] += 1
         else:
             for loc in locations:
-                gid, population = max(
-                    ((gid, self._extra[gid][0]) for gid in self._names.get(loc, [])),
-                    key = lambda x: x[1])
-                total[gid] += 1
+                idx = self._names.get(loc, False)
+                if idx:
+                    gid, population = max(
+                        ((gid, self._extra[gid, 0]) for gid in self._gid[idx]),
+                        key = lambda x: x[1])
+                    total[gid] += 1
 
         return total
 
 
     def gid(self, name):
         """Return the GeoName ID for the location"""
-        return self._names[name]
+        idx = self._names.get(name, False)
+        if idx:
+            return self._gid[idx]
+        else:
+            return None
 
     def extra(self, gid):
         """Return the stored information of the GeoName ID"""
-        return self._extra[gid]
+        return self._extra[gid, :]
 
 if __name__ == '__main__':
     logging.getLogger().setLevel(logging.DEBUG)
