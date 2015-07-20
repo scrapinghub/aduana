@@ -11,4 +11,6 @@ import scrapy
 class LocationsItem(scrapy.Item):
     # define the fields for your item here like:
     # name = scrapy.Field()
-    pass
+    date = scrapy.Field()
+    geoname_id = scrapy.Field()
+    count = scrapy.Field()

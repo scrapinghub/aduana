@@ -19,7 +19,13 @@ CONCURRENT_REQUESTS_PER_DOMAIN = 2
 LOGSTATS_INTERVAL = 10
 
 SPIDER_MIDDLEWARES = {}
-DOWNLOADER_MIDDLEWARES = {}
+DOWNLOADER_MIDDLEWARES = {
+    'scrapy.downloadermiddlewares.robotstxt.RobotsTxtMiddleware': 500,
+}
+
+ITEM_PIPELINES = {
+    'locations.pipelines.LocationsPipeline': 500,
+}
 
 #--------------------------------------------------------------------------
 # Frontier Settings

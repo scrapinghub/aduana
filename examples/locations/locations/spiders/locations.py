@@ -1,3 +1,5 @@
+import datetime
+
 from bs4 import BeautifulSoup
 import xxhash
 from langdetect import detect
@@ -9,6 +11,7 @@ from scrapy.selector import Selector
 from scrapy.exceptions import DontCloseSpider
 from scrapy import signals
 
+from ..items import LocationsItem
 from geonames import GeoNames
 
 def triangle(a):
@@ -42,17 +45,26 @@ class MySpider(Spider):
                 return
 
             if langid == 'en':
-                locations = MySpider.gn.count(text)
+                locations = MySpider.gn.count(text, names=False)
                 score = scorer(
                     float(sum(locations.itervalues()))/
                     float(len(text))
                 )
                 response.meta.update(score=score)
+
                 for link in self.link_extractor.extract_links(response):
                     request = Request(url=link.url)
                     request.meta.update(link_text=link.text)
                     request.meta.update(score=score)
                     yield request
+
+                date = datetime.datetime.now()
+                for gid, count in locations.iteritems():
+                    yield LocationsItem(
+                        date=date,
+                        geoname_id=gid,
+                        count=count
+                    )
             else:
                 response.meta.update(score=0)
 

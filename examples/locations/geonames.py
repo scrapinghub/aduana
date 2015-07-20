@@ -41,26 +41,31 @@ def download(filename, url):
 
 
 class GeoNamesRow(object):
+    """An structure with all GeoNames data for a location.
+
+    See: http://download.geonames.org/export/dump/readme.txt
+    """
     def __init__(self, line):
-        (self.gid,
-         self.name,
-         self.asciiname,
-         self.alternates,
-         self.lat,
-         self.lon,
+        (self.gid,                 # integer id of record in geonames database
+         self.name,                # name of geographical point (utf8)
+         self.asciiname,           # name of geographical point in plain ascii characters
+         self.alternates,          # alternatenames, comma separated
+         self.lat,                 # latitude in decimal degrees (wgs84)
+         self.lon,                 # longitude in decimal degrees (wgs84)
          self.feature_class,
          self.feature,
-         self.country,
-         self.alternate_country,
-         self.admin1,
-         self.admin2,
-         self.admin3,
-         self.admin4,
-         self.population,
-         self.elevation,
-         self.dem,
-         self.timezone,
-         self.modification) = line.split('\t')
+         self.country,             # ISO-3166 2-letter country code, 2 characters
+         self.alternate_country,   # alternate country codes, comma separated, ISO-3166 2-letter country code
+         self.admin1,              # fipscode (subject to change to iso code)
+         self.admin2,              # code for the second administrative division, a county in the US
+         self.admin3,              # code for third level administrative division
+         self.admin4,              # code for fourth level administrative division
+         self.population,          # bigint (8 byte int)
+         self.elevation,           # in meters, integer
+         self.dem,                 # digital elevation model, srtm3 or gtopo30
+         self.timezone,            # the timezone id
+         self.modification         # date of last modification in yyyy-MM-dd format
+        ) = line.split('\t')
 
         self.gid = int(self.gid)
         self.population = int(self.population)
