@@ -18,11 +18,12 @@ class LocationsPipeline(object):
 
     def process_item(self, item, spider):
         self.file.write(
-            "{0}\t{1}\t{2}\n".format(
-                item['date'],
-                item['geoname_id'],
-                item['count']
-            )
+            '\t'.join(
+                map(str, [item['date'],
+                          item['geoname_id'],
+                          spider.geo_names.name(item['geoname_id']),
+                          item['count']]))
+            + '\n'
         )
 
         return item

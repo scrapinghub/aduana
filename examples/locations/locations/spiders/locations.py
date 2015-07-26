@@ -12,7 +12,7 @@ from scrapy.exceptions import DontCloseSpider
 from scrapy import signals
 
 from ..items import LocationsItem
-from geonames import GeoNames
+from geonames import GeoNames, count_locations
 
 def triangle(a):
     def f(x):
@@ -27,7 +27,7 @@ scorer = triangle(0.005)
 class MySpider(Spider):
     name = 'locations'
     link_extractor = LxmlLinkExtractor()
-    gn = GeoNames()
+    geo_names = GeoNames()
 
     def parse(self, response):
         soup = BeautifulSoup(response.body)
@@ -45,7 +45,7 @@ class MySpider(Spider):
                 return
 
             if langid == 'en':
-                locations = MySpider.gn.count(text, names=False)
+                locations = count_locations(MySpider.geo_names, text)
                 score = scorer(
                     float(sum(locations.itervalues()))/
                     float(len(text))
