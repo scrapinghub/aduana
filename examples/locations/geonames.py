@@ -99,6 +99,19 @@ class CountryInfoRow(object):
 
 class GeoNames(object):
     def __init__(self, datafile='allCountries.zip'):
+        hierarchy_path = 'hierarchy.zip'
+        download(hierarchy_path,
+                 'http://download.geonames.org/export/dump/hierarchy.zip')
+
+        self._children = collections.defaultdict(list)
+        self._parents = collections.defaultdict(list)
+        with zipfile.ZipFile(hierarchy_path) as data:
+            for line in data.open('hierarchy.txt', 'r'):
+                parent, child = map(int, line.split()[:2])
+                self._children[parent].append(child)
+                self._parents[child].append(parent)
+
+
         country_path = 'countryInfo.txt'
         download(country_path,
                  'http://download.geonames.org/export/dump/countryInfo.txt')
@@ -109,6 +122,7 @@ class GeoNames(object):
                 if line[0] != '#':
                     row = CountryInfoRow(line)
                     self._countries[row.iso] = row
+
 
         download(datafile,
                 'http://download.geonames.org/export/dump/allCountries.zip')
@@ -121,16 +135,17 @@ class GeoNames(object):
                 self._max_gid = max(self._max_gid, row.gid)
                 yield row
 
-        self._extra = {}
         with zipfile.ZipFile(datafile) as data:
             i = 0
             self._trie = marisa_trie.Trie(name
                                           for row in rows(data)
                                           for name in row.all_names())
 
+
             self._gid = np.empty(shape=(len(self._trie),), dtype=object)
-            self._extra = np.zeros(shape=(self._max_gid + 1, 3), dtype=float)
-            self._names = np.empty(shape=(self._max_gid + 1,), dtype=object)
+            self._pos = np.zeros(shape=(self._max_gid + 1, 2), dtype=float)
+            self._population = np.zeros(shape=(self._max_gid + 1,), dtype=int)
+            self._names = np.empty(shape=(self._max_gid + 1,), dtype=int)
             self._country = np.empty(shape=(self._max_gid + 1,), dtype=object)
 
             for row in rows(data):
@@ -141,9 +156,14 @@ class GeoNames(object):
                     else:
                         self._gid[idx].append(row.gid)
 
-                self._extra[row.gid, :] = row.population, row.lat, row.lon
-                self._names[row.gid] = row.name
+                self._pos[row.gid, :] = row.lat, row.lon
+                self._population[row.gid] = row.population
+                self._names[row.gid] = self._trie.get(row.name)
                 self._country[row.gid] = row.country
+
+    @property
+    def max_gid(self):
+        return self._max_gid
 
     def gid(self, name):
         """Return the GeoName ID for the location"""
@@ -155,15 +175,18 @@ class GeoNames(object):
 
     def name(self, gid):
         if gid < len(self._names):
-            return self._names[gid]
+            return self._trie.restore_key(self._names[gid])
         else:
             return None
 
+    def iter_names(self):
+        return self._trie.iterkeys()
+
     def population(self, gid):
-        return self._extra[gid, 0]
+        return self._population[gid]
 
     def coordinates(self, gid):
-        return self._extra[gid, 1:]
+        return self._pos[gid, :]
 
     def country(self, gid):
         return self._country[gid]
@@ -171,6 +194,11 @@ class GeoNames(object):
     def country_info(self, iso_code):
         return self._countries.get(iso_code, None)
 
+    def children(self, gid):
+        return self._children[gid]
+
+    def parents(self, gid):
+        return self._parents[gid]
 
 def flatten(x):
     r = []
@@ -244,6 +272,15 @@ def count_locations(geonames, text):
 
     return total
 
+class CommonWords(object):
+    def __init__(self, words='common_words.txt'):
+        with open(words, 'r') as data:
+            self._words = set(line.strip() for line in data)
+
+    def __contains__(self, word):
+        return word.lower() in self._words
+
+common_words = CommonWords()
 
 if __name__ == '__main__':
     logging.getLogger().setLevel(logging.DEBUG)

@@ -29,7 +29,7 @@ class LocationsPipeline(object):
         return item
 
     def open_spider(self, spider):
-        self.file = open(self.path, 'w')
+        self.file = open(self.path, 'a')
 
     def close_spider(self, spider):
         self.file.close()
