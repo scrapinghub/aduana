@@ -9,6 +9,7 @@ import marisa_trie
 import nltk
 import requests
 import numpy as np
+import networkx as nx
 
 
 def download(filename, url):
@@ -276,34 +277,36 @@ def count_locations(geonames, text):
                  for s in sentences
                  for w in extract_gpe(nltk.ne_chunk(s))]
 
-    gids = []
-    for loc in locations:
+    gids = {}
+    for loc in set(locations):
         gid = geonames.gid(loc)
         if gid:
-            gids.append(gid)
+            gids[loc] = gid
 
+    G = nx.DiGraph()
+    def grow_graph(gid):
+        G.add_node(gid)
+        for parent in geonames.parents(gid):
+            G.add_node(parent)
+            G.add_edge(gid, parent)
 
-    countries = collections.defaultdict(int)
-    for gid in flatten(gids):
-        countries[geonames.country(gid)] += geonames.population(gid)
+            grow_graph(parent)
 
-    countries = sorted(
-        countries.iteritems(), key=lambda x: x[1], reverse=True)
-    accepted = set()
-    for country, population in countries:
-        info = geonames.country_info(country)
-        if info and population >= info.population/100:
-            accepted.add(country)
+    for gid in flatten(gids.values()):
+        grow_graph(gid)
+
+    hscore, ascore = nx.hits(G)
+    best = {}
+    for loc, gid in gids.iteritems():
+        score, gid = max((ascore[g], g) for g in gid)
+        best[loc] = gid
 
     total = collections.defaultdict(int)
-    for gid_group in gids:
-        accepted_gids = filter(
-            lambda gid: geonames.country(gid) in accepted,
-            gid_group)
-        if accepted_gids:
-            gid = max((geonames.population(gid), gid)
-                      for gid in accepted_gids)[1]
-            total[gid] += 1
+    for loc in locations:
+        try:
+            total[best[loc]] += 1
+        except KeyError:
+            pass
 
     return total
 
@@ -317,25 +320,24 @@ class CommonWords(object):
 
 common_words = CommonWords()
 
+
 if __name__ == '__main__':
     logging.getLogger().setLevel(logging.DEBUG)
 
+    import requests
+    from bs4 import BeautifulSoup
+
+    r = requests.get('https://en.wikipedia.org/wiki/Madrid')
+    soup = BeautifulSoup(r.text)
+    for script in soup(["script", "style"]):
+        script.extract()
+    text = soup.get_text()
+
     gn = GeoNames()
-    print count_locations(gn, r"""
-    The United States of America (USA), commonly referred to as the
-    United States (U.S.) or America, is a federal republic[16][17]
-    consisting of 50 states and a federal district. The 48 contiguous
-    states and Washington, D.C., are in central North America between
-    Canada and Mexico. The state of Alaska is located in the
-    northwestern part of North America and the state of Hawaii is an
-    archipelago in the mid-Pacific. The country also has five
-    populated and numerous unpopulated territories in the Pacific and
-    the Caribbean. At 3.8 million square miles (9.842 million km2)[18]
-    and with over 320 million people, the United States is the world's
-    fourth-largest country by total area and third most populous. It
-    is one of the world's most ethnically diverse and multicultural
-    nations, the product of large-scale immigration from many
-    countries.[19] The geography and climate of the United States are
-    also extremely diverse, and the country is home to a wide variety
-    of wildlife.
-    """)
+    count = sorted(
+        count_locations(gn, text).items(),
+        key=lambda x: x[1],
+        reverse=True
+    )
+    for loc, n in count:
+        print loc, n
