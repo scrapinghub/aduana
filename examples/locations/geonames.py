@@ -4,12 +4,14 @@ import itertools
 import logging
 import os.path
 import zipfile
+import struct
 
 import marisa_trie
 import nltk
 import requests
 import numpy as np
 import networkx as nx
+import lmdb
 
 
 def download(filename, url):
@@ -103,7 +105,10 @@ class CountryInfoRow(object):
 
         self.iso_numeric = int(self.iso_numeric)
 
+
 class GeoNames(object):
+    int_struct = struct.Struct('=i')
+
     def __init__(self, datafile='allCountries.zip'):
         hierarchy_path = 'hierarchy.zip'
         download(hierarchy_path,
@@ -135,9 +140,10 @@ class GeoNames(object):
         download(datafile,
                 'http://download.geonames.org/export/dump/allCountries.zip')
         with zipfile.ZipFile(datafile) as data:
-            i = 0
+            self._gid = lmdb.open('geonames_lmdb', max_dbs=2, map_size=1000000000)
             if (not os.path.exists('geonames.marisa') or
-                not os.path.exists('geonames.npz')):
+                not os.path.exists('geonames.npz') or
+                not os.path.exists('geonames_lmdb')):
                 self._max_gid = 0
 
                 def rows(data):
@@ -151,7 +157,6 @@ class GeoNames(object):
                                               for row in rows(data)
                                               for name in row.all_names())
                 self._trie.save('geonames.marisa')
-                self._gid = np.empty(shape=(len(self._trie),), dtype=object)
 
                 self._info = np.zeros(self._max_gid + 1, dtype=[
                     ('lat',        'f4'),
@@ -161,29 +166,29 @@ class GeoNames(object):
                     ('country',    'i4')
                 ])
 
-                for row in rows(data):
-                    for name in row.all_names():
-                        idx = self._trie[name]
-                        if self._gid[idx] is None:
-                            self._gid[idx] = [row.gid]
-                        else:
-                            self._gid[idx].append(row.gid)
+                with self._gid.begin(
+                        db=self._gid.open_db(
+                            key='gid', dupsort=True, create=True),
+                        write=True) as txn:
+                    for row in rows(data):
+                        for name in row.all_names():
+                            txn.put(GeoNames.int_struct.pack(self._trie[name]),
+                                    GeoNames.int_struct.pack(row.gid))
 
-                    self._info[row.gid] = (
-                        row.lat,
-                        row.lon,
-                        row.population,
-                        self._trie.get(row.name),
-                        self._country_code.get(row.country, -1)
+                        self._info[row.gid] = (
+                            row.lat,
+                            row.lon,
+                            row.population,
+                            self._trie.get(row.name),
+                            self._country_code.get(row.country, -1)
                     )
-                np.savez('geonames.npz', gid=self._gid, info=self._info)
+                np.savez('geonames.npz', info=self._info)
 
             else:
                 self._trie = marisa_trie.Trie()
                 self._trie.load('geonames.marisa')
 
                 with np.load('geonames.npz') as data:
-                    self._gid = data['gid']
                     self._info = data['info']
 
                 self._max_gid = len(self._info) - 1
@@ -197,7 +202,12 @@ class GeoNames(object):
         """Return the GeoName ID for the location"""
         idx = self._trie.get(name, False)
         if idx:
-            return self._gid[idx]
+            db = self._gid.open_db(key='gid', dupsort=True)
+            with self._gid.begin(db=db, write=False) as txn:
+                cur = txn.cursor(db)
+                if not cur.set_key(GeoNames.int_struct.pack(idx)):
+                    return None
+                return [GeoNames.int_struct.unpack(x)[0] for x in cur.iternext_dup()]
         else:
             return None
 
@@ -245,23 +255,33 @@ def flatten(x):
     return r
 
 
-def extract_gpe(t):
-    """Extract GPEs (Geo-Political Entity) from an annotated tree"""
-    try:
-        label = t.label()
-    except AttributeError:
-        return []
+def ner_tokenizer(text):
+    """Apply NLTK's Named Entity Recognizer to the text to extract candidate
+    locations"""
 
-    if label == 'GPE':
-        return [' '.join(child[0] for child in t)]
-    else:
-        locations = []
-        for child in t:
-            locations += extract_gpe(child)
+    def extract_gpe(t):
+        """Extract GPEs (Geo-Political Entity) from an annotated tree"""
+        try:
+            label = t.label()
+        except AttributeError:
+            return []
+
+        if label == 'GPE':
+            return [' '.join(child[0] for child in t)]
+        else:
+            locations = []
+            for child in t:
+                locations += extract_gpe(child)
         return locations
 
+    sentences = map(nltk.pos_tag,
+                    map(nltk.word_tokenize, nltk.sent_tokenize(text)))
+    return [w
+            for s in sentences
+            for w in extract_gpe(nltk.ne_chunk(s))]
 
-def count_locations(geonames, text):
+
+def count_locations(geonames, text, tokenizer=ner_tokenizer):
     """Count number of occurences of locations inside text.
 
     Returns a dictionary where each key is a location, given either by
@@ -271,11 +291,8 @@ def count_locations(geonames, text):
     In case of ambiguity this method will select the location with highest
     population.
     """
-    sentences = map(nltk.pos_tag,
-                    map(nltk.word_tokenize, nltk.sent_tokenize(text)))
-    locations = [w
-                 for s in sentences
-                 for w in extract_gpe(nltk.ne_chunk(s))]
+
+    locations = tokenizer(text)
 
     gids = {}
     for loc in set(locations):
@@ -287,13 +304,14 @@ def count_locations(geonames, text):
     def grow_graph(gid):
         G.add_node(gid)
         for parent in geonames.parents(gid):
-            G.add_node(parent)
             G.add_edge(gid, parent)
-
             grow_graph(parent)
 
-    for gid in flatten(gids.values()):
-        grow_graph(gid)
+    i = 0
+    for loc in locations:
+        for gid in gids.get(loc, []):
+            G.add_edge(i, gid)
+            grow_graph(gid)
 
     hscore, ascore = nx.hits(G)
     best = {}
@@ -340,4 +358,4 @@ if __name__ == '__main__':
         reverse=True
     )
     for loc, n in count:
-        print loc, n
+        print gn.name(loc), n
