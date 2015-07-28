@@ -95,7 +95,12 @@ class CountryInfoRow(object):
         self.population = int(self.population)
         self.area = float(self.area)
         self.neighbours = self.neighbours.split(',')
+        try:
+            self.gid = int(self.gid)
+        except ValueError:
+            self.gid = -1
 
+        self.iso_numeric = int(self.iso_numeric)
 
 class GeoNames(object):
     def __init__(self, datafile='allCountries.zip'):
@@ -103,63 +108,85 @@ class GeoNames(object):
         download(hierarchy_path,
                  'http://download.geonames.org/export/dump/hierarchy.zip')
 
-        self._children = collections.defaultdict(list)
-        self._parents = collections.defaultdict(list)
+        self._children = collections.defaultdict(set)
+        self._parents = collections.defaultdict(set)
         with zipfile.ZipFile(hierarchy_path) as data:
             for line in data.open('hierarchy.txt', 'r'):
                 parent, child = map(int, line.split()[:2])
-                self._children[parent].append(child)
-                self._parents[child].append(parent)
+                self._children[parent].add(child)
+                self._parents[child].add(parent)
 
 
         country_path = 'countryInfo.txt'
         download(country_path,
                  'http://download.geonames.org/export/dump/countryInfo.txt')
 
-        self._countries = {}
+        self._country_code = {}
+        self._country_info = {}
         with open(country_path, 'r') as data:
             for line in data:
                 if line[0] != '#':
                     row = CountryInfoRow(line)
-                    self._countries[row.iso] = row
+                    self._country_info[row.iso_numeric] = row
+                    self._country_code[row.iso] = row.iso_numeric
 
 
         download(datafile,
                 'http://download.geonames.org/export/dump/allCountries.zip')
-
-        self._max_gid = 0
-        def rows(data):
-            for row in itertools.imap(
-                    GeoNamesRow,
-                    codecs.iterdecode(data.open('allCountries.txt', 'r'), 'utf-8')):
-                self._max_gid = max(self._max_gid, row.gid)
-                yield row
-
         with zipfile.ZipFile(datafile) as data:
             i = 0
-            self._trie = marisa_trie.Trie(name
-                                          for row in rows(data)
-                                          for name in row.all_names())
+            if (not os.path.exists('geonames.marisa') or
+                not os.path.exists('geonames.npz')):
+                self._max_gid = 0
 
+                def rows(data):
+                    for row in itertools.imap(
+                            GeoNamesRow,
+                            codecs.iterdecode(data.open('allCountries.txt', 'r'), 'utf-8')):
+                        self._max_gid = max(self._max_gid, row.gid)
+                        yield row
 
-            self._gid = np.empty(shape=(len(self._trie),), dtype=object)
-            self._pos = np.zeros(shape=(self._max_gid + 1, 2), dtype=float)
-            self._population = np.zeros(shape=(self._max_gid + 1,), dtype=int)
-            self._names = np.empty(shape=(self._max_gid + 1,), dtype=int)
-            self._country = np.empty(shape=(self._max_gid + 1,), dtype=object)
+                self._trie = marisa_trie.Trie(name
+                                              for row in rows(data)
+                                              for name in row.all_names())
+                self._trie.save('geonames.marisa')
+                self._gid = np.empty(shape=(len(self._trie),), dtype=object)
 
-            for row in rows(data):
-                for name in row.all_names():
-                    idx = self._trie[name]
-                    if self._gid[idx] is None:
-                        self._gid[idx] = [row.gid]
-                    else:
-                        self._gid[idx].append(row.gid)
+                self._info = np.zeros(self._max_gid + 1, dtype=[
+                    ('lat',        'f4'),
+                    ('lon',        'f4'),
+                    ('population', 'i8'),
+                    ('names',      'i4'),
+                    ('country',    'i4')
+                ])
 
-                self._pos[row.gid, :] = row.lat, row.lon
-                self._population[row.gid] = row.population
-                self._names[row.gid] = self._trie.get(row.name)
-                self._country[row.gid] = row.country
+                for row in rows(data):
+                    for name in row.all_names():
+                        idx = self._trie[name]
+                        if self._gid[idx] is None:
+                            self._gid[idx] = [row.gid]
+                        else:
+                            self._gid[idx].append(row.gid)
+
+                    self._info[row.gid] = (
+                        row.lat,
+                        row.lon,
+                        row.population,
+                        self._trie.get(row.name),
+                        self._country_code.get(row.country, -1)
+                    )
+                np.savez('geonames.npz', gid=self._gid, info=self._info)
+
+            else:
+                self._trie = marisa_trie.Trie()
+                self._trie.load('geonames.marisa')
+
+                with np.load('geonames.npz') as data:
+                    self._gid = data['gid']
+                    self._info = data['info']
+
+                self._max_gid = len(self._info) - 1
+
 
     @property
     def max_gid(self):
@@ -174,8 +201,8 @@ class GeoNames(object):
             return None
 
     def name(self, gid):
-        if gid < len(self._names):
-            return self._trie.restore_key(self._names[gid])
+        if gid < len(self._info):
+            return self._trie.restore_key(self._info[gid]['names'])
         else:
             return None
 
@@ -183,22 +210,29 @@ class GeoNames(object):
         return self._trie.iterkeys()
 
     def population(self, gid):
-        return self._population[gid]
+        return self._info[gid]['population']
 
     def coordinates(self, gid):
-        return self._pos[gid, :]
+        return (self._info[gid]['lat'], self._info[gid]['lon'])
 
     def country(self, gid):
-        return self._country[gid]
+        try:
+            return self._country_info[self._info[gid]['country']].iso
+        except KeyError:
+            return None
 
-    def country_info(self, iso_code):
-        return self._countries.get(iso_code, None)
+    def country_info(self, country):
+        try:
+            return self._country_info[self._country_code[country]]
+        except KeyError:
+            return None
 
     def children(self, gid):
         return self._children[gid]
 
     def parents(self, gid):
         return self._parents[gid]
+
 
 def flatten(x):
     r = []
@@ -247,6 +281,7 @@ def count_locations(geonames, text):
         gid = geonames.gid(loc)
         if gid:
             gids.append(gid)
+
 
     countries = collections.defaultdict(int)
     for gid in flatten(gids):
