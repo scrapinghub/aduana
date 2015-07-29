@@ -12,6 +12,7 @@ import requests
 import numpy as np
 import networkx as nx
 import lmdb
+import sklearn.neighbors
 
 
 def download(filename, url):
@@ -158,9 +159,8 @@ class GeoNames(object):
                                               for name in row.all_names())
                 self._trie.save('geonames.marisa')
 
+                self._cords = np.zeros(shape=(self._max_gid + 1, 2))
                 self._info = np.zeros(self._max_gid + 1, dtype=[
-                    ('lat',        'f4'),
-                    ('lon',        'f4'),
                     ('population', 'i8'),
                     ('names',      'i4'),
                     ('country',    'i4')
@@ -176,13 +176,13 @@ class GeoNames(object):
                                     GeoNames.int_struct.pack(row.gid))
 
                         self._info[row.gid] = (
-                            row.lat,
-                            row.lon,
                             row.population,
                             self._trie.get(row.name),
                             self._country_code.get(row.country, -1)
-                    )
-                np.savez('geonames.npz', info=self._info)
+                        )
+                        self._cords[row.gid, :] = row.lat, row.lon
+
+                np.savez('geonames.npz', info=self._info, cords=self._cords)
 
             else:
                 self._trie = marisa_trie.Trie()
@@ -190,9 +190,11 @@ class GeoNames(object):
 
                 with np.load('geonames.npz') as data:
                     self._info = data['info']
+                    self._cords = data['cords']
 
                 self._max_gid = len(self._info) - 1
 
+            self._nn = sklearn.neighbors.KDTree(self._cords)
 
     @property
     def max_gid(self):
@@ -224,7 +226,7 @@ class GeoNames(object):
         return self._info[gid]['population']
 
     def coordinates(self, gid):
-        return (self._info[gid]['lat'], self._info[gid]['lon'])
+        return self._cords[gid]
 
     def country(self, gid):
         try:
@@ -244,6 +246,8 @@ class GeoNames(object):
     def parents(self, gid):
         return self._parents[gid]
 
+    def nearest(self, gid, k=1):
+        return self._nn.query(self.coordinates(gid), k=k+1)[1:]
 
 def flatten(x):
     r = []
@@ -281,6 +285,21 @@ def ner_tokenizer(text):
             for w in extract_gpe(nltk.ne_chunk(s))]
 
 
+def graph_locations(geonames, gids):
+    G = nx.Graph()
+
+    def grow_graph(gid):
+        parents = geonames.parents(gid)
+        for parent in parents:
+            G.add_edge(gid, parent)
+            grow_graph(parent)
+
+    for gid in gids:
+        grow_graph(gid)
+
+    return G
+
+
 def count_locations(geonames, text, tokenizer=ner_tokenizer):
     """Count number of occurences of locations inside text.
 
@@ -300,24 +319,18 @@ def count_locations(geonames, text, tokenizer=ner_tokenizer):
         if gid:
             gids[loc] = gid
 
-    G = nx.DiGraph()
-    def grow_graph(gid):
-        G.add_node(gid)
-        for parent in geonames.parents(gid):
-            G.add_edge(gid, parent)
-            grow_graph(parent)
+    G = graph_locations(geonames, flatten(gids.values()))
+    max_component = nx.Graph()
+    for g in nx.connected_component_subgraphs(G):
+        if len(g) > len(max_component):
+            max_component = g
 
-    i = 0
-    for loc in locations:
-        for gid in gids.get(loc, []):
-            G.add_edge(i, gid)
-            grow_graph(gid)
-
-    hscore, ascore = nx.hits(G)
+    centrality = nx.closeness_centrality(max_component)
     best = {}
     for loc, gid in gids.iteritems():
-        score, gid = max((ascore[g], g) for g in gid)
+        score, gid = max((centrality.get(g, 0.0), g) for g in gid)
         best[loc] = gid
+        print loc, gid, score
 
     total = collections.defaultdict(int)
     for loc in locations:
@@ -338,10 +351,7 @@ class CommonWords(object):
 
 common_words = CommonWords()
 
-
-if __name__ == '__main__':
-    logging.getLogger().setLevel(logging.DEBUG)
-
+def get_test_text():
     import requests
     from bs4 import BeautifulSoup
 
@@ -349,13 +359,19 @@ if __name__ == '__main__':
     soup = BeautifulSoup(r.text)
     for script in soup(["script", "style"]):
         script.extract()
-    text = soup.get_text()
+    return soup.get_text()
 
+def test_counter():
     gn = GeoNames()
     count = sorted(
-        count_locations(gn, text).items(),
+        count_locations(gn, get_test_text()).items(),
         key=lambda x: x[1],
         reverse=True
     )
     for loc, n in count:
         print gn.name(loc), n
+
+if __name__ == '__main__':
+    logging.getLogger().setLevel(logging.DEBUG)
+
+    test_counter()
