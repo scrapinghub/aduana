@@ -115,14 +115,12 @@ class GeoNames(object):
         download(hierarchy_path,
                  'http://download.geonames.org/export/dump/hierarchy.zip')
 
-        self._children = collections.defaultdict(set)
-        self._parents = collections.defaultdict(set)
+        self._hierarchy = nx.DiGraph()
+        self._root = set()
         with zipfile.ZipFile(hierarchy_path) as data:
             for line in data.open('hierarchy.txt', 'r'):
                 parent, child = map(int, line.split()[:2])
-                self._children[parent].add(child)
-                self._parents[child].add(parent)
-
+                self._hierarchy.add_edge(parent, child)
 
         country_path = 'countryInfo.txt'
         download(country_path,
@@ -196,6 +194,7 @@ class GeoNames(object):
 
             self._nn = sklearn.neighbors.KDTree(self._cords)
 
+
     @property
     def max_gid(self):
         return self._max_gid
@@ -241,13 +240,49 @@ class GeoNames(object):
             return None
 
     def children(self, gid):
+        try:
+            return self._hierarchy.successors(gid)
+        except NetworkXError:
+            return []
+
         return self._children[gid]
 
     def parents(self, gid):
-        return self._parents[gid]
+        try:
+            p = self._hierarchy.predecessors(gid)
+        except nx.NetworkXError:
+            return []
 
-    def nearest(self, gid, k=1):
-        return self._nn.query(self.coordinates(gid), k=k+1)[1:]
+        if not p and gid not in self._root:
+            name = self.name(gid)
+            population = self.population(gid)
+            descendants = nx.descendants(self._hierarchy, gid)
+            for neighbor in self.nearest(gid, 1000):
+                match_name = self.name(neighbor) == name
+                bigger = (population > 0) and (self.population(neighbor) > population)
+                if ((match_name or bigger) and (neighbor not in descendants)):
+                    p.append(neighbor)
+                    self._hierarchy.add_edge(neighbor, gid)
+                    break
+            if not p:
+                self._root.add(gid)
+        return p
+
+    def nearest(self, location, k=1):
+        gid = location if isinstance(location, int) else None
+
+        near = self._nn.query(
+            self.coordinates(gid) if gid else location,
+            k=k+1,
+            return_distance=False,
+            sort_results=True
+        )[0,1:].tolist()
+
+        if gid:
+            return filter(lambda x: x != gid, near)
+        else:
+            return near
+
 
 def flatten(x):
     r = []
@@ -297,6 +332,12 @@ def graph_locations(geonames, gids):
     for gid in gids:
         grow_graph(gid)
 
+    for edge in G.edges_iter(data=True):
+        if edge[0] and edge[1] in gids:
+            edge[2]['dist'] = 0.0
+        else:
+            edge[2]['dist'] = 1.0
+
     return G
 
 
@@ -319,18 +360,17 @@ def count_locations(geonames, text, tokenizer=ner_tokenizer):
         if gid:
             gids[loc] = gid
 
-    G = graph_locations(geonames, flatten(gids.values()))
+    G = graph_locations(geonames, set(flatten(gids.values())))
     max_component = nx.Graph()
     for g in nx.connected_component_subgraphs(G):
         if len(g) > len(max_component):
             max_component = g
 
-    centrality = nx.closeness_centrality(max_component)
+    centrality = nx.closeness_centrality(max_component, distance='dist')
     best = {}
     for loc, gid in gids.iteritems():
         score, gid = max((centrality.get(g, 0.0), g) for g in gid)
         best[loc] = gid
-        print loc, gid, score
 
     total = collections.defaultdict(int)
     for loc in locations:
