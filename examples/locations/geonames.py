@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 import collections
 import codecs
 import itertools
@@ -13,7 +15,37 @@ import numpy as np
 import networkx as nx
 import lmdb
 import sklearn.neighbors
+import scipy as sp
 
+def geod2ecef(geod):
+    """Convert from WGS84 geodetic coordinates to ECEF coordinates"""
+    if len(geod.shape) == 1:
+        lat = geod[0]
+        lon = geod[1]
+        if len(geod) == 3:
+            alt = geod[2]
+        else:
+            alt = 0.0
+    else:
+        lat = geod[:, 0]
+        lon = geod[:, 1]
+        if geod.shape[1] == 3:
+            alt = geod[:, 2]
+        else:
+            alt = 0.0
+
+    a = 6378137
+    e = 8.1819190842622e-2
+    N = a / np.sqrt(1 - e**2 * np.sin(lat)**2)
+
+    x = (N + alt) * np.cos(lat) * np.cos(lon)
+    y = (N + alt) * np.cos(lat) * np.sin(lon)
+    z = ((1-e**2) * N + alt) * np.sin(lat)
+
+    if len(geod.shape) == 1:
+        return np.array([x, y, z])
+    else:
+        return np.column_stack((x, y, z))
 
 def download(filename, url):
     """If filename is not present then download from url"""
@@ -157,7 +189,7 @@ class GeoNames(object):
                                               for name in row.all_names())
                 self._trie.save('geonames.marisa')
 
-                self._cords = np.zeros(shape=(self._max_gid + 1, 2))
+                self._geod = np.zeros(shape=(self._max_gid + 1, 2))
                 self._info = np.zeros(self._max_gid + 1, dtype=[
                     ('population', 'i8'),
                     ('names',      'i4'),
@@ -178,9 +210,9 @@ class GeoNames(object):
                             self._trie.get(row.name),
                             self._country_code.get(row.country, -1)
                         )
-                        self._cords[row.gid, :] = row.lat, row.lon
+                        self._geod[row.gid, :] = row.lat, row.lon
 
-                np.savez('geonames.npz', info=self._info, cords=self._cords)
+                np.savez('geonames.npz', info=self._info, geod=self._geod)
 
             else:
                 self._trie = marisa_trie.Trie()
@@ -188,11 +220,12 @@ class GeoNames(object):
 
                 with np.load('geonames.npz') as data:
                     self._info = data['info']
-                    self._cords = data['cords']
+                    self._geod = data['geod']
 
                 self._max_gid = len(self._info) - 1
 
-            self._nn = sklearn.neighbors.KDTree(self._cords)
+            self._ecef = geod2ecef(np.pi/180.0*self._geod)
+            self._nn = sklearn.neighbors.KDTree(self._ecef)
 
 
     @property
@@ -225,7 +258,10 @@ class GeoNames(object):
         return self._info[gid]['population']
 
     def coordinates(self, gid):
-        return self._cords[gid]
+        return self._geod[gid]
+
+    def coordinates_ecef(self, gid):
+        return self._ecef[gid, :]
 
     def country(self, gid):
         try:
@@ -251,12 +287,15 @@ class GeoNames(object):
         try:
             p = self._hierarchy.predecessors(gid)
         except nx.NetworkXError:
-            return []
+            p = []
 
         if not p and gid not in self._root:
             name = self.name(gid)
             population = self.population(gid)
-            descendants = nx.descendants(self._hierarchy, gid)
+            try:
+                descendants = nx.descendants(self._hierarchy, gid)
+            except nx.NetworkXError:
+                descendants = set()
             for neighbor in self.nearest(gid, 1000):
                 match_name = self.name(neighbor) == name
                 bigger = (population > 0) and (self.population(neighbor) > population)
@@ -272,7 +311,7 @@ class GeoNames(object):
         gid = location if isinstance(location, int) else None
 
         near = self._nn.query(
-            self.coordinates(gid) if gid else location,
+            self.coordinates_ecef(gid) if gid else location,
             k=k+1,
             return_distance=False,
             sort_results=True
@@ -283,6 +322,18 @@ class GeoNames(object):
         else:
             return near
 
+    def neighborhood(self, location, radius):
+        gid = location if isinstance(location, int) else None
+
+        near = self._nn.query_radius(
+            self.coordinates_ecef(gid) if gid else location,
+            radius
+        )[0]
+
+        if gid:
+            return filter(lambda x: x != gid, near)
+        else:
+            return near
 
 def flatten(x):
     r = []
@@ -293,6 +344,31 @@ def flatten(x):
             r.append(a)
     return r
 
+def window_iter(x, size):
+    """Iterate over x using windows of the given size.
+
+    For example:
+
+    for window in window_iter(range(8), 3):
+        print window
+
+    Outputs:
+
+    [0, 1, 2]
+    [1, 2, 3]
+    [2, 3, 4]
+    [3, 4, 5]
+    [4, 5, 6]
+    [5, 6, 7]
+    """
+    it = iter(x)
+    window = collections.deque(itertools.islice(it, size) , maxlen=size)
+    yield tuple(window)
+
+    for element in it:
+        window.popleft()
+        window.append(element)
+        yield tuple(window)
 
 def ner_tokenizer(text):
     """Apply NLTK's Named Entity Recognizer to the text to extract candidate
@@ -320,66 +396,150 @@ def ner_tokenizer(text):
             for w in extract_gpe(nltk.ne_chunk(s))]
 
 
-def graph_locations(geonames, gids):
-    G = nx.Graph()
+def graph_location(geonames, prefix, location, max_gids=20):
+    """Build the graph associated with location. Append prefix to each node."""
+    gids = geonames.gid(location)
+    if not gids:
+        return
 
-    def grow_graph(gid):
-        parents = geonames.parents(gid)
+    # Restrict the number of gids per location. We will add negative ties
+    # between these gids and some locations have more then 1000 gids, which
+    # gives more than 1 million ties.
+    gids = map(lambda x: x[1],
+               sorted([(geonames.population(gid), gid) for gid in gids],
+                      reverse=True)[:max_gids])
+
+    # Build a node from a gid by adding the prefix
+    def node(gid):
+        return (prefix, gid)
+
+    G = nx.Graph(prefix=prefix)
+
+    def add_ancestors(gid, parents):
+        ngid = node(gid)
         for parent in parents:
-            G.add_edge(gid, parent)
-            grow_graph(parent)
+            nparent = node(parent)
+            if nparent not in G:
+                G.add_node(nparent, label=geonames.name(parent), bias=0.0)
+            G.add_edge(ngid, nparent, weight=1.0)
+            add_ancestors(parent, geonames.parents(parent))
 
     for gid in gids:
-        grow_graph(gid)
+        parents = geonames.parents(gid)
+        if parents:
+            G.add_node(node(gid), label=geonames.name(gid), bias=1.0)
+            add_ancestors(gid, parents)
 
-    for edge in G.edges_iter(data=True):
-        if edge[0] and edge[1] in gids:
-            edge[2]['dist'] = 0.0
-        else:
-            edge[2]['dist'] = 1.0
+        # Add ties between neighbouring countries
+        c_info = geonames.country_info(geonames.country(gid))
+        if c_info:
+            for neighbour in c_info.neighbours:
+                n_info = geonames.country_info(neighbour)
+                if n_info:
+                    nc = node(c_info.gid)
+                    nn = node(n_info.gid)
+                    if nc not in G:
+                        G.add_node(nc, label=c_info.name, bias=0.0)
+                    if nn not in G:
+                        G.add_node(nn, label=n_info.name, bias=0.0)
+                    G.add_edge(nc, nn, weight=1.0)
+
+    # Add a negative tie between gids competing for the same location
+    for g1, g2 in itertools.combinations(map(node, gids), 2):
+        if (g1 in G) and (g2 in G) and not G.has_edge(g1, g2):
+            G.add_edge(g1, g2, weight=-1.0)
 
     return G
 
 
-def count_locations(geonames, text, tokenizer=ner_tokenizer):
-    """Count number of occurences of locations inside text.
+def propagate(A, b=None, start=None, eps=1e-3, max_iter=1000):
+    """Propagate neural network signals until an energy minimum is achieved"""
+    x = start if start is not None else 1e-3*np.random.uniform(-1.0, 1.0, size=A.shape[0])
+    err = eps + 1
+    i = 0
+    e1 = None
+    logging.info('Iteration/Error/Energy')
+    while err > eps:
+        for k in xrange(A.shape[0]):
+            x[k] = A[k,:].dot(x)
+            if b is not None:
+                x[k] += b[k]
 
-    Returns a dictionary where each key is a location, given either by
-    name or by id, depending on the value of the 'names' parameter.
-    The values are the number of occurences.
+            # Soft Hopfield network
+            x[k] = -1.0 + 2.0/(1.0 + np.exp(-x[k]))
 
-    In case of ambiguity this method will select the location with highest
-    population.
+        e2 = -0.5*x.dot(A.dot(x)) - x.dot(b)
+        if e1:
+            err = e1 - e2
+        e1 = e2
+
+        i += 1
+
+        logging.info('{0: 4d}/{1:.2e}/{2:.2e}'.format(i, err, e1))
+        if i>max_iter:
+            logging.warning(
+                'Exceeded maximum number of iterations ({0}) with error {1}>{2}'.format(
+                    max_iter, err, eps))
+            return x
+    return x
+
+
+def tag_locations(geonames, text, tokenizer=ner_tokenizer, out_graph=None):
+    """Return a list of tuples where the first element is the location, the
+    second element is the associated geoname id and the third element is an
+    score between -1 and 1.
     """
 
-    locations = tokenizer(text)
+    # Extract locations names from text
+    locations = filter(
+        lambda location: geonames.gid(location),
+        tokenizer(text))
 
-    gids = {}
-    for loc in set(locations):
-        gid = geonames.gid(loc)
-        if gid:
-            gids[loc] = gid
+    subgraphs = filter(lambda x: x is not None,
+                       [graph_location(geonames, pos, location)
+                        for pos, location in enumerate(locations)])
 
-    G = graph_locations(geonames, set(flatten(gids.values())))
-    max_component = nx.Graph()
-    for g in nx.connected_component_subgraphs(G):
-        if len(g) > len(max_component):
-            max_component = g
+    G = nx.union_all(subgraphs)
+    for window in window_iter(subgraphs, 5):
+        gids = [set(gid for (_, gid) in H.nodes_iter()) for H in window]
+        for (G1, gids_1), (G2, gids_2) in itertools.combinations(zip(window, gids), 2):
+            p1 = G1.graph['prefix']
+            p2 = G2.graph['prefix']
+            for gid in (gids_1 & gids_2):
+                G.add_edge((p1, gid), (p2, gid), weight=1.0)
 
-    centrality = nx.closeness_centrality(max_component, distance='dist')
-    best = {}
-    for loc, gid in gids.iteritems():
-        score, gid = max((centrality.get(g, 0.0), g) for g in gid)
-        best[loc] = gid
+    # Assign an index to each graph node
+    index = {node: i for (i, node) in enumerate(G.nodes())}
 
-    total = collections.defaultdict(int)
-    for loc in locations:
-        try:
-            total[best[loc]] += 1
-        except KeyError:
-            pass
+    A = nx.adjacency_matrix(G, weight='weight')
+    b = np.array([data['bias'] for node, data in G.nodes(data=True)])
 
-    return total
+    activation = propagate(A, b)
+    for node, data in G.nodes_iter(data=True):
+        data['score'] = float(activation[index[node]])
+
+    if out_graph is not None:
+        nx.write_gexf(G, out_graph)
+
+    geotags = []
+    for pos, location in enumerate(locations):
+        best_score = None
+        best_gid = None
+        for gid in geonames.gid(location):
+            try:
+                score = activation[index[(pos, gid)]]
+            except KeyError:
+                continue
+            if score > best_score:
+                best_gid = gid
+                best_score = score
+
+        if best_gid:
+            geotags.append((location, best_gid, best_score))
+            logging.info(u'{0} -> {1} (country: {2}, score: {3:.4f})'.format(
+                location, best_gid, geonames.country(best_gid), best_score))
+
+    return geotags
 
 class CommonWords(object):
     def __init__(self, words='common_words.txt'):
@@ -401,17 +561,44 @@ def get_test_text():
         script.extract()
     return soup.get_text()
 
+def get_short_text():
+    return u"""
+    Madrid (/məˈdrɪd/, Spanish: [maˈðɾið], locally: [maˈðɾiθ, -ˈðɾi]) is a
+    south-western European city and the capital and largest municipality
+    of Spain. The population of the city is almost 3.2 million[4] and that
+    of the Madrid metropolitan area, around 7 million. It is the
+    third-largest city in the European Union, after London and Berlin, and
+    its metropolitan area is the third-largest in the European Union after
+    Paris and London.[5][6][7][8] The city spans a total of 604.3 km2
+    (233.3 sq mi).[9]
+
+    The city is located on the Manzanares River in the centre of both the
+    country and the Community of Madrid (which comprises the city of
+    Madrid, its conurbation and extended suburbs and villages); this
+    community is bordered by the autonomous communities of Castile and
+    León and Castile-La Mancha. As the capital city of Spain, seat of
+    government, and residence of the Spanish monarch, Madrid is also the
+    political, economic and cultural centre of Spain.[10] The current
+    mayor is Manuela Carmena from Ahora Madrid.
+
+    The Madrid urban agglomeration has the third-largest GDP[11] in the
+    European Union and its influences in politics, education,
+    entertainment, environment, media, fashion, science, culture, and the
+    arts all contribute to its status as one of the world's major global
+    cities.[12][13] Due to its economic output, high standard of living,
+    and market size, Madrid is considered the major financial centre of
+    Southern Europe[14][15] and the Iberian Peninsula; it hosts the head
+    offices of the vast majority of the major Spanish companies, such as
+    Telefónica, Iberia and Repsol. Madrid is the 17th most livable city in
+    the world according to Monocle magazine, in its 2014 index.[16][17]
+    """
+
 def test_counter():
     gn = GeoNames()
-    count = sorted(
-        count_locations(gn, get_test_text()).items(),
-        key=lambda x: x[1],
-        reverse=True
-    )
-    for loc, n in count:
-        print gn.name(loc), n
+    text = get_test_text()
+    geotags = tag_locations(gn, text)
 
 if __name__ == '__main__':
-    logging.getLogger().setLevel(logging.DEBUG)
+    logging.getLogger().setLevel(logging.INFO)
 
     test_counter()
