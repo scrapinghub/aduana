@@ -372,6 +372,9 @@ page_info_dump_get_score(MDB_val *val) {
 static PageInfo *
 page_info_load(const MDB_val *val) {
      PageInfo *pi = calloc(1, sizeof(*pi));
+     if (!pi)
+       return 0;
+
      char *data = val->mv_data;
      size_t i = 0;
      size_t j;

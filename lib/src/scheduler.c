@@ -42,6 +42,8 @@ page_request_new(size_t n_urls) {
      if (!req)
           return 0;
      req->urls = calloc(n_urls, sizeof(*req->urls));
+     if (!req->urls)
+          return 0;
      req->n_urls = 0;
 
      return req;

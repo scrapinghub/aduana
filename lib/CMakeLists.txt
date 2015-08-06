@@ -27,6 +27,7 @@ add_library(lmdb OBJECT
 include_directories(lib/lmdb)
 set_property(TARGET lmdb PROPERTY POSITION_INDEPENDENT_CODE 1)
 
+
 if(WIN32)
     add_library(mman OBJECT lib/mman.c)
     set_property(TARGET mman PROPERTY POSITION_INDEPENDENT_CODE 1)
@@ -60,6 +61,10 @@ endif(WIN32)
 # Tests
 #############################################################
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+  # LMDB generates quite a few warnings. Suppress them.
+  set_property(TARGET lmdb PROPERTY COMPILE_FLAGS
+    "-Wno-shadow -Wno-cast-align -Wno-unused-parameter -Wno-format-extra-args")
+
   add_definitions(-DTEST)
   include_directories(test)
   set(ADUANA_SRC ${ADUANA_SRC} test/CuTest.c)
