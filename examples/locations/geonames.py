@@ -164,6 +164,8 @@ class GeoNames(object):
     int_struct = struct.Struct('=i')
 
     def __init__(self):
+        logging.info('Started GeoNames constructor')
+
         # self._hierarchy: a DiGraph
         # self._root: a set of locations without parents (they have no parents
         #             in self._hierarchy AND we could not find any other ones).
@@ -212,10 +214,10 @@ class GeoNames(object):
         download(data_path,
                 'http://download.geonames.org/export/dump/allCountries.zip')
         with zipfile.ZipFile(data_path) as data:
-            self._gid = lmdb.open('geonames_lmdb', max_dbs=2, map_size=1000000000)
+            self._gid = lmdb.open('geonames-gid', subdir=False, max_dbs=2, map_size=1000000000)
             if (not os.path.exists('geonames.marisa') or
                 not os.path.exists('geonames.npz') or
-                not os.path.exists('geonames_lmdb')):
+                not os.path.exists('geonames-gid')):
                 self._max_gid = 0
 
                 def rows(data):
@@ -268,6 +270,7 @@ class GeoNames(object):
             self._ecef = geod2ecef(np.pi/180.0*self._geod)
             self._nn = sklearn.neighbors.KDTree(self._ecef)
 
+        logging.info('Finished GeoNames constructor')
 
     @property
     def max_gid(self):
@@ -545,26 +548,45 @@ def tag_locations(geonames, text, tokenizer=ner_tokenizer, out_graph=None):
     """
 
     # Extract locations names from text
+    logging.info('tag_locations: extracting candidate tokens from text')
     locations = filter(
         lambda location: geonames.gid(location),
         tokenizer(text))
 
+    logging.info('tag_locations: building sub-graphs')
     subgraphs = filter(lambda x: x is not None,
                        [graph_location(geonames, pos, location)
                         for pos, location in enumerate(locations)])
 
-    G = nx.union_all(subgraphs)
+    gids = {H.graph['prefix']: set(gid for (_, gid) in H.nodes_iter())
+            for H in subgraphs}
+
+    logging.info('tag_locations: union of sub-graphs')
+    G = nx.Graph()
+    for H in subgraphs:
+        G.add_nodes_from(H.nodes_iter(data=True))
+        G.add_edges_from(H.edges_iter(data=True))
+
+    logging.info('tag_locations: joining sub-graphs')
+    def join_graphs(G1, G2):
+        p1 = G1.graph['prefix']
+        p2 = G2.graph['prefix']
+        for gid in (gids[p1] & gids[p2]):
+            G.add_edge((p1, gid), (p2, gid), weight=1.0)
+
     for window in window_iter(subgraphs, 5):
-        gids = [set(gid for (_, gid) in H.nodes_iter()) for H in window]
-        for (G1, gids_1), (G2, gids_2) in itertools.combinations(zip(window, gids), 2):
-            p1 = G1.graph['prefix']
-            p2 = G2.graph['prefix']
-            for gid in (gids_1 & gids_2):
-                G.add_edge((p1, gid), (p2, gid), weight=1.0)
+        G1 = window[0]
+        for G2 in window[1:]:
+            join_graphs(G1, G2)
+
+    if len(window) > 1:
+        for G1, G2 in itertools.combinations(window[1:], 2):
+            join_graphs(G1, G2)
 
     # Assign an index to each graph node
     index = {node: i for (i, node) in enumerate(G.nodes())}
 
+    logging.info('tag_locations: Hopfield network activation')
     A = nx.adjacency_matrix(G, weight='weight')
     b = np.array([data['bias'] for node, data in G.nodes(data=True)])
 
@@ -593,6 +615,7 @@ def tag_locations(geonames, text, tokenizer=ner_tokenizer, out_graph=None):
             logging.info(u'{0} -> {1} (country: {2}, score: {3:.4f})'.format(
                 location, best_gid, geonames.country(best_gid), best_score))
 
+    logging.info('tag_locations: done')
     return geotags
 
 class CommonWords(object):
@@ -654,5 +677,6 @@ def test_counter():
 
 if __name__ == '__main__':
     logging.getLogger().setLevel(logging.INFO)
+    logging.basicConfig(format='%(asctime)s %(message)s')
 
     test_counter()
