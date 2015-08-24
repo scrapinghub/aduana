@@ -15,10 +15,27 @@ import numpy as np
 import networkx as nx
 import lmdb
 import sklearn.neighbors
-import scipy as sp
+
 
 def geod2ecef(geod):
-    """Convert from WGS84 geodetic coordinates to ECEF coordinates"""
+    """Convert from WGS84 geodetic coordinates to ECEF coordinates.
+
+    - geod: NumPy array with geodetic latitude, longitude and, optionally,
+            height. Latitude and longitude are in radians and height in meters.
+            If no height is provided then height is assumed to be zero. Valid
+            array shapes are:
+
+                (2,  ) -> latitude and longitude
+                (3,  ) -> latitude, longitude and height
+                (N, 2) -> each row has latitude and longitude
+                (N, 3) -> each row has latitude, longitude and height
+
+    - returns: an array with shape (3, ) or (N, 3) whith ECEF coordinates in
+               meters.
+
+    Note: we need this function to perform valid distance comparisons between
+    locations.
+    """
     if len(geod.shape) == 1:
         lat = geod[0]
         lon = geod[1]
@@ -106,25 +123,29 @@ class GeoNamesRow(object):
 
 
 class CountryInfoRow(object):
+    """An structure with all GeoNames data for a country.
+
+    See: http://download.geonames.org/export/dump/readme.txt
+    """
     def __init__(self, line):
-        (self.iso,
-         self.iso3,
-         self.iso_numeric,
-         self.fips,
+        (self.iso,                # ISO 2 letter alphabetic code
+         self.iso3,               # ISO 3 letter alphabetic code
+         self.iso_numeric,        # ISO Numeric code
+         self.fips,               # https://en.wikipedia.org/wiki/List_of_FIPS_country_codes
          self.name,
-         self.capital,
-         self.area,
-         self.population,
-         self.continent,
-         self.tld,
-         self.currency_code,
-         self.currency_name,
-         self.phone,
+         self.capital,            # Capital name
+         self.area,               # In km^2
+         self.population,         # Integer
+         self.continent,          # EU, AS, NA, SA, AF, OC, AN (Antarctica)
+         self.tld,                # Top Level Domain
+         self.currency_code,      # EUR, USD, ...
+         self.currency_name,      # Euro, Dollar, ...
+         self.phone,              # International call prefix
          self.postal_code_format,
          self.postal_code_regex,
-         self.languages,
-         self.gid,
-         self.neighbours,
+         self.languages,          # Delimited by commas
+         self.gid,                # GeoName ID
+         self.neighbours,         # ISO 2-letter codes delimited by commaas
          self.equivalent_fips) = line.split('\t')
 
         self.languages = self.languages.split(',')
@@ -142,11 +163,13 @@ class CountryInfoRow(object):
 class GeoNames(object):
     int_struct = struct.Struct('=i')
 
-    def __init__(self, datafile='allCountries.zip'):
+    def __init__(self):
+        # self._hierarchy: a DiGraph
+        # self._root: a set of locations without parents (they have no parents
+        #             in self._hierarchy AND we could not find any other ones).
         hierarchy_path = 'hierarchy.zip'
         download(hierarchy_path,
                  'http://download.geonames.org/export/dump/hierarchy.zip')
-
         self._hierarchy = nx.DiGraph()
         self._root = set()
         with zipfile.ZipFile(hierarchy_path) as data:
@@ -154,10 +177,11 @@ class GeoNames(object):
                 parent, child = map(int, line.split()[:2])
                 self._hierarchy.add_edge(parent, child)
 
+        # self._country_info: map ISO numeric to CountryInfoRow
+        # self._country_code: map ISO 2-letter code to ISO numeric
         country_path = 'countryInfo.txt'
         download(country_path,
                  'http://download.geonames.org/export/dump/countryInfo.txt')
-
         self._country_code = {}
         self._country_info = {}
         with open(country_path, 'r') as data:
@@ -167,10 +191,27 @@ class GeoNames(object):
                     self._country_info[row.iso_numeric] = row
                     self._country_code[row.iso] = row.iso_numeric
 
+        # A name can map to several different locations (GeoNamesIDs), and two
+        # names can map to the same location too.
+        #
+        # Name1 --+--> GeoNameID 1 --> (name, population, country, coordinates)
+        #         +--> GeoNameID 2 --> (name, population, country, coordinates)
+        #         +--> GeoNameID 3 --> ...
+        #               ^
+        # Name2 ---+----+
+        #          |
+        #          +-> GeoNameID 4 --> ...
 
-        download(datafile,
+        # self._trie: map name to trie index
+        # self._gid : map trie index to a list of GeoName IDs
+        # self._info: array mapping gid to (population, name, country)
+        # self._geod: array mapping gid to geodetic coordinates
+        # self._ecef: self._geod converted to ECEF
+        # self._nn  : KDTree to query nearest neighbors
+        data_path='allCountries.zip'
+        download(data_path,
                 'http://download.geonames.org/export/dump/allCountries.zip')
-        with zipfile.ZipFile(datafile) as data:
+        with zipfile.ZipFile(data_path) as data:
             self._gid = lmdb.open('geonames_lmdb', max_dbs=2, map_size=1000000000)
             if (not os.path.exists('geonames.marisa') or
                 not os.path.exists('geonames.npz') or
@@ -192,7 +233,7 @@ class GeoNames(object):
                 self._geod = np.zeros(shape=(self._max_gid + 1, 2))
                 self._info = np.zeros(self._max_gid + 1, dtype=[
                     ('population', 'i8'),
-                    ('names',      'i4'),
+                    ('name',       'i4'),
                     ('country',    'i4')
                 ])
 
@@ -233,7 +274,10 @@ class GeoNames(object):
         return self._max_gid
 
     def gid(self, name):
-        """Return the GeoName ID for the location"""
+        """Return a list of GeoName IDs associated with the location name.
+
+        If name is not inside database then return None.
+        """
         idx = self._trie.get(name, False)
         if idx:
             db = self._gid.open_db(key='gid', dupsort=True)
@@ -246,36 +290,49 @@ class GeoNames(object):
             return None
 
     def name(self, gid):
+        """Return (main) name for the given GeoName ID or None if the ID does
+        not exist"""
         if gid < len(self._info):
-            return self._trie.restore_key(self._info[gid]['names'])
+            return self._trie.restore_key(self._info[gid]['name'])
         else:
             return None
 
     def iter_names(self):
+        """Iterate over all location names"""
         return self._trie.iterkeys()
 
     def population(self, gid):
+        """Return population for the given GeoName ID"""
         return self._info[gid]['population']
 
     def coordinates(self, gid):
+        """Return WGS84 coordinates for the GeoName ID.
+
+        Coordinates are (latitude, longitude) on decimal degrees.
+        """
         return self._geod[gid]
 
     def coordinates_ecef(self, gid):
+        """Return ECEF coordinates in meters for the GeoName ID"""
         return self._ecef[gid, :]
 
     def country(self, gid):
+        """Return 2-letter ISO country code for GeoName ID"""
         try:
             return self._country_info[self._info[gid]['country']].iso
         except KeyError:
             return None
 
     def country_info(self, country):
+        """Return all country information for the given country
+        (2-letter ISO code)"""
         try:
             return self._country_info[self._country_code[country]]
         except KeyError:
             return None
 
     def children(self, gid):
+        """Return dirent descendants in the hierarchy for this GeoName ID"""
         try:
             return self._hierarchy.successors(gid)
         except NetworkXError:
@@ -284,6 +341,18 @@ class GeoNames(object):
         return self._children[gid]
 
     def parents(self, gid):
+        """Return direct asscendants in the hierarchy for this GeoName ID.
+
+        If the location has not parents in the hierarchy it will attempt to
+        find them nonetheless using the following algorithm:
+
+        1. Find all descendants
+        2. Find the 1000 nearest locations, if any of them has the same name
+           or has more population and it's not a descendant then it's the
+           new parent.
+
+        The descendants check is to avoid loops in the hierarchy.
+        """
         try:
             p = self._hierarchy.predecessors(gid)
         except nx.NetworkXError:
@@ -308,6 +377,11 @@ class GeoNames(object):
         return p
 
     def nearest(self, location, k=1):
+        """Find nearest locations to this one.
+
+        Location can be a GeoName ID (which will be pruned from the results) or
+        ECEF coordinates.
+        """
         gid = location if isinstance(location, int) else None
 
         near = self._nn.query(
@@ -322,27 +396,6 @@ class GeoNames(object):
         else:
             return near
 
-    def neighborhood(self, location, radius):
-        gid = location if isinstance(location, int) else None
-
-        near = self._nn.query_radius(
-            self.coordinates_ecef(gid) if gid else location,
-            radius
-        )[0]
-
-        if gid:
-            return filter(lambda x: x != gid, near)
-        else:
-            return near
-
-def flatten(x):
-    r = []
-    for a in x:
-        if hasattr(a, '__iter__'):
-            r += flatten(a)
-        else:
-            r.append(a)
-    return r
 
 def window_iter(x, size):
     """Iterate over x using windows of the given size.
@@ -369,6 +422,7 @@ def window_iter(x, size):
         window.popleft()
         window.append(element)
         yield tuple(window)
+
 
 def ner_tokenizer(text):
     """Apply NLTK's Named Entity Recognizer to the text to extract candidate
