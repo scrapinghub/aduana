@@ -419,7 +419,10 @@ def window_iter(x, size):
     """
     it = iter(x)
     window = collections.deque(itertools.islice(it, size) , maxlen=size)
-    yield tuple(window)
+    if len(window) > 0:
+        yield tuple(window)
+    else:
+        return
 
     for element in it:
         window.popleft()

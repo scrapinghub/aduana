@@ -1,4 +1,5 @@
 import datetime
+import collections
 
 from bs4 import BeautifulSoup
 import xxhash
@@ -12,7 +13,7 @@ from scrapy.exceptions import DontCloseSpider
 from scrapy import signals
 
 from ..items import LocationsItem
-from geonames import GeoNames, count_locations
+from geonames import GeoNames, tag_locations
 
 def triangle(a):
     def f(x):
@@ -45,9 +46,12 @@ class MySpider(Spider):
                 return
 
             if langid == 'en':
-                locations = count_locations(MySpider.geo_names, text)
+                tagged = filter(lambda x: x[2] >= 0.99,
+                                tag_locations(MySpider.geo_names, text))
+                gid_count = collections.Counter(gid for name, gid, score in tagged)
+
                 score = scorer(
-                    float(sum(locations.itervalues()))/
+                    float(sum(gid_count.itervalues()))/
                     float(len(text))
                 )
                 response.meta.update(score=score)
@@ -59,7 +63,7 @@ class MySpider(Spider):
                     yield request
 
                 date = datetime.datetime.now()
-                for gid, count in locations.iteritems():
+                for gid, count in gid_count.iteritems():
                     yield LocationsItem(
                         date=date,
                         geoname_id=gid,
