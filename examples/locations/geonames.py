@@ -9,13 +9,13 @@ import zipfile
 import struct
 
 import marisa_trie
-import nltk
 import requests
 import numpy as np
 import networkx as nx
 import lmdb
 import sklearn.neighbors
 
+import tokenizer
 
 def geod2ecef(geod):
     """Convert from WGS84 geodetic coordinates to ECEF coordinates.
@@ -427,32 +427,6 @@ def window_iter(x, size):
         yield tuple(window)
 
 
-def ner_tokenizer(text):
-    """Apply NLTK's Named Entity Recognizer to the text to extract candidate
-    locations"""
-
-    def extract_gpe(t):
-        """Extract GPEs (Geo-Political Entity) from an annotated tree"""
-        try:
-            label = t.label()
-        except AttributeError:
-            return []
-
-        if label == 'GPE':
-            return [' '.join(child[0] for child in t)]
-        else:
-            locations = []
-            for child in t:
-                locations += extract_gpe(child)
-        return locations
-
-    sentences = map(nltk.pos_tag,
-                    map(nltk.word_tokenize, nltk.sent_tokenize(text)))
-    return [w
-            for s in sentences
-            for w in extract_gpe(nltk.ne_chunk(s))]
-
-
 def graph_location(geonames, prefix, location, max_gids=20):
     """Build the graph associated with location. Append prefix to each node."""
     gids = geonames.gid(location)
@@ -488,8 +462,14 @@ def graph_location(geonames, prefix, location, max_gids=20):
 
         parents = geonames.parents(gid)
         if parents:
-            G.add_node(node(gid), label=geonames.name(gid),
-                       bias=geonames.population(gid)/float(c_info.population))
+            if c_info.capital == geonames.name(gid):
+                bias = 1.0
+            elif c_info.population > 0:
+                bias = geonames.population(gid)/float(c_info.population)
+            else:
+                bias = 0.0
+
+            G.add_node(node(gid), label=geonames.name(gid), bias=bias)
             add_ancestors(gid, parents)
 
         # Add ties between neighbouring countries
@@ -550,7 +530,7 @@ def propagate(G, eps=1e-3, max_iter=1000, weight_label='weight', bias_label='bia
     return x, index
 
 
-def tag_locations(geonames, text, tokenizer=ner_tokenizer, out_graph=None):
+def tag_locations(geonames, text, tokenizer=tokenizer.ner_tokenizer, out_graph=None):
     """Return a list of tuples where the first element is the location, the
     second element is the associated geoname id and the third element is an
     score between -1 and 1.
