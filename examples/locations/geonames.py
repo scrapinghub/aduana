@@ -482,24 +482,27 @@ def graph_location(geonames, prefix, location, max_gids=20):
             add_ancestors(parent, geonames.parents(parent))
 
     for gid in gids:
+        c_info = geonames.country_info(geonames.country(gid))
+        if not c_info:
+            continue
+
         parents = geonames.parents(gid)
         if parents:
-            G.add_node(node(gid), label=geonames.name(gid), bias=1.0)
+            G.add_node(node(gid), label=geonames.name(gid),
+                       bias=geonames.population(gid)/float(c_info.population))
             add_ancestors(gid, parents)
 
         # Add ties between neighbouring countries
-        c_info = geonames.country_info(geonames.country(gid))
-        if c_info:
-            for neighbour in c_info.neighbours:
-                n_info = geonames.country_info(neighbour)
-                if n_info:
-                    nc = node(c_info.gid)
-                    nn = node(n_info.gid)
-                    if nc not in G:
-                        G.add_node(nc, label=c_info.name, bias=0.0)
-                    if nn not in G:
-                        G.add_node(nn, label=n_info.name, bias=0.0)
-                    G.add_edge(nc, nn, weight=1.0)
+        for neighbour in c_info.neighbours:
+            n_info = geonames.country_info(neighbour)
+            if n_info:
+                nc = node(c_info.gid)
+                nn = node(n_info.gid)
+                if nc not in G:
+                    G.add_node(nc, label=c_info.name, bias=0.0)
+                if nn not in G:
+                    G.add_node(nn, label=n_info.name, bias=0.0)
+                G.add_edge(nc, nn, weight=1.0)
 
     # Add a negative tie between gids competing for the same location
     for g1, g2 in itertools.combinations(map(node, gids), 2):
@@ -509,21 +512,27 @@ def graph_location(geonames, prefix, location, max_gids=20):
     return G
 
 
-def propagate(A, b=None, start=None, eps=1e-3, max_iter=1000):
+def propagate(G, eps=1e-3, max_iter=1000, weight_label='weight', bias_label='bias'):
     """Propagate neural network signals until an energy minimum is achieved"""
-    x = start if start is not None else 1e-3*np.random.uniform(-1.0, 1.0, size=A.shape[0])
+
+    index = {node: i for (i, node) in enumerate(G.nodes())}
+    A = nx.adjacency_matrix(G, weight=weight_label)
+    b = np.array([data[bias_label] for node, data in G.nodes(data=True)])
+
+    logging.info('propagate: building schedule')
+    coloring = collections.defaultdict(list)
+    for node, color in nx.greedy_color(G).iteritems():
+        coloring[color].append(index[node])
+
+    x = 1e-6*np.random.uniform(-1.0, 1.0, size=A.shape[0])
     err = eps + 1
     i = 0
     e1 = None
-    logging.info('Iteration/Error/Energy')
-    while err > eps:
-        for k in xrange(A.shape[0]):
-            x[k] = A[k,:].dot(x)
-            if b is not None:
-                x[k] += b[k]
 
-            # Soft Hopfield network
-            x[k] = -1.0 + 2.0/(1.0 + np.exp(-x[k]))
+    logging.info('propagate: iteration/error/energy')
+    while err > eps:
+        for group in coloring.itervalues():
+            x[group] = -1.0 + 2.0/(1.0 + np.exp(-A[group,:].dot(x) - b[group]))
 
         e2 = -0.5*x.dot(A.dot(x)) - x.dot(b)
         if e1:
@@ -532,13 +541,13 @@ def propagate(A, b=None, start=None, eps=1e-3, max_iter=1000):
 
         i += 1
 
-        logging.info('{0: 4d}/{1:.2e}/{2:.2e}'.format(i, err, e1))
+        logging.info('propagate: {0: 4d}/{1:.2e}/{2:.2e}'.format(i, err, e1))
         if i>max_iter:
             logging.warning(
                 'Exceeded maximum number of iterations ({0}) with error {1}>{2}'.format(
                     max_iter, err, eps))
-            return x
-    return x
+            return x, index
+    return x, index
 
 
 def tag_locations(geonames, text, tokenizer=ner_tokenizer, out_graph=None):
@@ -583,14 +592,8 @@ def tag_locations(geonames, text, tokenizer=ner_tokenizer, out_graph=None):
         for G1, G2 in itertools.combinations(window[1:], 2):
             join_graphs(G1, G2)
 
-    # Assign an index to each graph node
-    index = {node: i for (i, node) in enumerate(G.nodes())}
-
     logging.info('tag_locations: Hopfield network activation')
-    A = nx.adjacency_matrix(G, weight='weight')
-    b = np.array([data['bias'] for node, data in G.nodes(data=True)])
-
-    activation = propagate(A, b)
+    activation, index = propagate(G)
     for node, data in G.nodes_iter(data=True):
         data['score'] = float(activation[index[node]])
 
