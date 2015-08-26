@@ -566,11 +566,14 @@ def tag_locations(geonames, text, tokenizer=tokenizer.ner_tokenizer, out_graph=N
         for gid in (gids[p1] & gids[p2]):
             G.add_edge((p1, gid), (p2, gid), weight=1.0)
 
+    last_window = []
     for window in window_iter(subgraphs, 5):
         G1 = window[0]
         for G2 in window[1:]:
             join_graphs(G1, G2)
+        last_window = window
 
+    window = last_window
     if len(window) > 1:
         for G1, G2 in itertools.combinations(window[1:], 2):
             join_graphs(G1, G2)
