@@ -1,0 +1,16 @@
+beautifulsoup4==4.3.2
+xxhash
+langdetect
+
+scrapy
+frontera
+aduana
+
+marisa_trie
+requests
+networkx>=1.10
+lmdb
+numpy
+scipy
+sklearn
+nltk
