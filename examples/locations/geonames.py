@@ -468,7 +468,7 @@ def graph_location(geonames, prefix, location, max_gids=20):
             if c_info.capital == geonames.name(gid):
                 bias = 1.0
             elif c_info.population > 0:
-                bias = geonames.population(gid)/float(c_info.population)
+                bias = float(geonames.population(gid))/float(c_info.population)
             else:
                 bias = 0.0
 
