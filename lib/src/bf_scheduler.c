@@ -147,6 +147,13 @@ bf_scheduler_expand(BFScheduler *sch) {
      return sch->error->code;
 }
 
+static int
+bf_scheduler_crawlable_page(BFScheduler *sch, PageInfo *pi) {
+     return (pi->n_crawls == 0) &&
+	  ((sch->max_crawl_depth == 0) ||
+	   (pi->depth <= sch->max_crawl_depth));
+}
+
 BFSchedulerError
 bf_scheduler_add(BFScheduler *sch, const CrawledPage *page) {
      if (bf_scheduler_expand(sch) != 0)
@@ -195,9 +202,7 @@ bf_scheduler_add(BFScheduler *sch, const CrawledPage *page) {
 
      for (PageInfoList *node = pil; node != 0; node=node->next) {
           PageInfo *pi = node->page_info;
-          if ((pi->n_crawls == 0) &&
-              ((sch->max_crawl_depth == 0) ||
-               (pi->depth <= sch->max_crawl_depth))) {
+          if (bf_scheduler_crawlable_page(sch, pi)) {
                ScheduleKey se = {
                     .score = 0.0,
                     .hash = node->hash
@@ -239,6 +244,111 @@ on_error:
      bf_scheduler_add_error(sch, error2);
      return sch->error->code;
 }
+
+BFSchedulerError
+bf_scheduler_reload(BFScheduler *sch) {
+     if (bf_scheduler_expand(sch) != 0)
+          return sch->error->code;
+
+     char *error1 = 0;
+     char *error2 = 0;
+
+     MDB_txn *txn = 0;
+     MDB_cursor *cur = 0;
+
+     if (txn_manager_begin(sch->txn_manager, 0, &txn) != 0) {
+          error1 = "starting transaction";
+          error2 = sch->txn_manager->error->message;
+          goto on_error;
+     }
+     int mdb_rc = bf_scheduler_open_cursor(txn, &cur);
+     if (mdb_rc != 0) {
+          error1 = "opening cursor";
+          error2 = mdb_strerror(mdb_rc);
+          goto on_error;
+     }
+
+     HashInfoStream *st;
+     if (hashinfo_stream_new(&st, sch->page_db) != 0) {
+	  error1 = "opening page_db stream";
+	  error2 = sch->page_db->error->message;
+	  goto on_error;
+     }
+
+     uint64_t n_reloaded_pages = 0;
+     uint64_t hash;
+     PageInfo *pi;
+     while (hashinfo_stream_next(st, &hash, &pi) == stream_state_next) {
+          if (bf_scheduler_crawlable_page(sch, pi)) {
+               ScheduleKey se = {
+                    .score = 0.0,
+                    .hash = hash
+               };
+
+               if (sch->scorer->state)
+                    sch->scorer->add(sch->scorer->state, pi, &se.score);
+               else
+                    se.score = pi->score;
+
+               MDB_val key = {
+                    .mv_size = sizeof(se),
+                    .mv_data = &se
+               };
+               MDB_val val = {
+                    .mv_size = 0,
+                    .mv_data = 0
+               };
+
+               switch (mdb_rc = mdb_cursor_put(cur, &key, &val, MDB_NODUPDATA)) {
+	       case 0:
+		    ++n_reloaded_pages;
+		    break;
+	       case MDB_KEYEXIST:
+		    // do nothing
+		    break;
+	       default:
+                    error1 = "adding page to schedule";
+                    error2 = mdb_strerror(mdb_rc);
+                    goto on_error;
+               }
+          }
+	  page_info_delete(pi);
+     }
+     hashinfo_stream_delete(st);
+
+     if (txn_manager_commit(sch->txn_manager, txn) != 0) {
+          error1 = "commiting schedule transaction";
+          error2 = sch->txn_manager->error->message;
+          goto on_error;
+     }
+
+     int rc = 0;
+     if ((rc = pthread_mutex_lock(&sch->update_thread->wait_mutex)) != 0) {
+          error1 = "locking n_pages mutex";
+     } else {
+          sch->update_thread->n_pages_new += n_reloaded_pages;
+          if ((rc = pthread_cond_broadcast(&sch->update_thread->wait_cond)) != 0)
+               error1 = "broadcasting n_pages signal";
+          else if ((rc = pthread_mutex_unlock(&sch->update_thread->wait_mutex)) != 0)
+               error1 = "unlocking n_pages mutex";
+     }
+     if (error1 != 0) {
+          error2 = strerror(rc);
+          goto on_error;
+     }
+
+     return 0;
+
+on_error:
+     if (txn != 0)
+          txn_manager_abort(sch->txn_manager, txn);
+
+     bf_scheduler_set_error(sch, bf_scheduler_error_internal, __func__);
+     bf_scheduler_add_error(sch, error1);
+     bf_scheduler_add_error(sch, error2);
+     return sch->error->code;
+}
+
 
 static BFSchedulerError
 bf_scheduler_change_score(BFScheduler *sch,

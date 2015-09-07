@@ -168,6 +168,15 @@ bf_scheduler_new(BFScheduler **sch, PageDB *db, const char *path);
 BFSchedulerError
 bf_scheduler_add(BFScheduler *sch, const CrawledPage *page);
 
+/** Add to schedule all non-crawled pages
+ *
+ * This can be used to retry pages that were requested but could not be
+ * downloaded.
+ *
+ * @return 0 if success, otherwise the error code
+ */
+BFSchedulerError
+bf_scheduler_reload(BFScheduler *sch);
 
 /** Return new pages to be crawled
  *
