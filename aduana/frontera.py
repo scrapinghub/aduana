@@ -61,7 +61,7 @@ class Backend(frontera.Backend):
     def page_crawled(self, response, links):
         cp = aduana.CrawledPage(
             response.url,
-            [(link.url, link.meta['scrapy_meta']['score']) for link in links])
+            [(link.url, link.meta['scrapy_meta'].get('score', 0.0)) for link in links])
 
         try:
             cp.score = response.meta['scrapy_meta']['score']
