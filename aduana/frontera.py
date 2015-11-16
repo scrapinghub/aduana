@@ -50,7 +50,7 @@ class Backend(frontera.Backend):
         self._scheduler.add(
             aduana.CrawledPage(
                 '_seed_{0}'.format(self._n_seeds),
-                [(link.url, 1.0) for link in seeds]
+                [(link.url, link.meta['scrapy_meta'].get('score', 1.0)) for link in seeds]
             )
         )
         self._n_seeds += 1
