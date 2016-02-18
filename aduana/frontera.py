@@ -78,6 +78,8 @@ class Backend(frontera.Backend):
     def get_next_requests(self, max_n_requests, **kwargs):
         return map(Request, self._scheduler.requests(max_n_requests))
 
+    def finished(self):
+        return False
 
 class IgnoreHostNameAdapter(requests.adapters.HTTPAdapter):
     def cert_verify(self, conn, url, verify, cert):
