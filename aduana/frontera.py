@@ -1,15 +1,17 @@
 from __future__ import absolute_import
 
-import frontera
+from frontera import Backend as BaseBackend
 from frontera.core.models import Request
+from frontera.core.components import BaseCrawlingStrategy
 import tempfile
 import aduana
 import requests
 import requests.adapters
 import requests.auth
+import logging
 
 
-class Backend(frontera.Backend):
+class Backend(BaseBackend):
     def __init__(self, scheduler):
         self._scheduler = scheduler
         self._n_seeds = 0
@@ -78,6 +80,8 @@ class Backend(frontera.Backend):
     def get_next_requests(self, max_n_requests, **kwargs):
         return map(Request, self._scheduler.requests(max_n_requests))
 
+    def finished(self):
+        return False
 
 class IgnoreHostNameAdapter(requests.adapters.HTTPAdapter):
     def cert_verify(self, conn, url, verify, cert):
@@ -85,7 +89,7 @@ class IgnoreHostNameAdapter(requests.adapters.HTTPAdapter):
         return super(IgnoreHostNameAdapter,
                      self).cert_verify(conn, url, verify, cert)
 
-class WebBackend(frontera.Backend):
+class WebBackend(BaseBackend):
     def __init__(self,
                  logger,
                  server_name='localhost',
@@ -162,3 +166,60 @@ class WebBackend(frontera.Backend):
             return []
         else:
             return map(Request, r.json())
+
+
+class PageRankStrategy(BaseCrawlingStrategy):
+    def __init__(self, scheduler):
+        self._scheduler = scheduler
+        self._n_seeds = 0
+
+    @classmethod
+    def from_worker(cls, settings):
+        db_path = settings.get('PAGE_DB_PATH', None)
+        if db_path:
+            persist = 1
+        else:
+            db_path = tempfile.mkdtemp(prefix='frontera_', dir='./')
+            persist = 0
+        page_db = aduana.PageDB(db_path, persist=persist)
+
+        logger = logging.getLogger('pagerank')
+        scheduler_class = settings.get('BACKEND_SCHEDULER', None)
+        if scheduler_class is None:
+            scheduler_class = aduana.BFScheduler
+            logger.warning(
+                'No SCHEDULER setting. Using default BFScheduler')
+
+        if scheduler_class is aduana.BFScheduler:
+            return cls(
+                aduana.BFScheduler.from_settings(
+                    page_db, settings, logger))
+        elif scheduler_class is aduana.FreqScheduler:
+            return cls(
+                aduana.FreqScheduler.from_settings(
+                    page_db, settings))
+
+    def stop(self):
+        self._scheduler.close()
+        self._scheduler._page_db.close()
+
+    def add_seeds(self, seeds):
+        self._scheduler.add(
+            aduana.CrawledPage(
+                '_seed_{0}'.format(self._n_seeds),
+                [(link.url, link.meta['scrapy_meta'].get('score', 1.0)) for link in seeds]
+            )
+        )
+        self._n_seeds += 1
+
+    def request_error(self, page, error):
+        pass
+
+    def page_crawled(self, response, links):
+        cp = aduana.CrawledPage(
+            response.url,
+            [(link.url, link.meta['scrapy_meta'].get('score', 0.0)) for link in links])
+        cp.score = response.meta['scrapy_meta'].get('score', 0.0)
+        if 'content_hash' in response.meta['scrapy_meta']:
+            cp.hash = response.meta['scrapy_meta']['content_hash']
+        self._scheduler.add(cp)
